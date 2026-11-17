@@ -1,0 +1,16 @@
+{
+  "_note": "Danh sach model goi y khi cai dat. size_gb = dung luong tai ve cua ban mac dinh tren LM Studio (lmstudio.ai/models). Them/bot model tai day.",
+  "models": [
+    {"key": "qwen/qwen3.5-2b",        "name": "Qwen3.5 2B",        "size_gb": 2.0,  "vision": true},
+    {"key": "qwen/qwen3.5-4b",        "name": "Qwen3.5 4B",        "size_gb": 3.75, "vision": true},
+    {"key": "google/gemma-4-e2b",     "name": "Gemma 4 E2B",       "size_gb": 4.2,  "vision": true},
+    {"key": "google/gemma-4-e4b",     "name": "Gemma 4 E4B",       "size_gb": 5.9,  "vision": true},
+    {"key": "qwen/qwen3.5-9b",        "name": "Qwen3.5 9B",        "size_gb": 7.0,  "vision": true},
+    {"key": "google/gemma-4-12b-qat", "name": "Gemma 4 12B QAT",   "size_gb": 7.4,  "vision": true},
+    {"key": "openai/gpt-oss-20b",     "name": "GPT-OSS 20B",       "size_gb": 11.3, "vision": false},
+    {"key": "google/gemma-4-26b-a4b", "name": "Gemma 4 26B A4B",   "size_gb": 15.6, "vision": true},
+    {"key": "qwen/qwen3.8-27b",       "name": "Qwen3.8 27B",       "size_gb": 16.5, "vision": true},
+    {"key": "google/gemma-4-31b",     "name": "Gemma 4 31B",       "size_gb": 19.0, "vision": true},
+    {"key": "openai/gpt-oss-120b",    "name": "GPT-OSS 120B",      "size_gb": 59.0, "vision": false}
+  ]
+}

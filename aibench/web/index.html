@@ -1,0 +1,967 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Bench · Tech by Lân</title>
+<link rel="icon" href="/logo-mark.png">
+<script>
+  // Đặt theme trước khi vẽ để không bị nháy màu.
+  (function () {
+    var t = null;
+    try { t = localStorage.getItem("aibench.theme"); } catch (e) {}
+    if (t !== "light" && t !== "dark") t = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    document.documentElement.dataset.theme = t;
+  })();
+</script>
+<style>
+  /* ===== Giao diện SÁNG: trắng – xanh dương, gọn và sạch ===== */
+  :root {
+    --bg: #eaf0fa; --bg2: #f8fafe; --card: rgba(255,255,255,.84); --field: #f3f6fb; --text: #131a26; --muted: #5d6779;
+    --line: #d5deec; --accent: #2563eb; --accent2: #7c3aed; --accent-text: #fff; --ok: #15803d; --bad: #b91c1c; --warn: #b45309;
+    --soft: #e4ecff; --head: rgba(255,255,255,.92); --shadow: 0 6px 24px rgba(30,60,120,.10); --glow: 0 0 0 0 transparent;
+    --grid: rgba(37,99,235,.07); --fx: 37,99,235; --fx2: 124,58,237; --orb1: rgba(37,99,235,.20); --orb2: rgba(124,58,237,.14);
+    --c0: #2563eb; --c1: #d97706; --c2: #dc2626; --c3: #059669; --radius: 12px;
+  }
+  /* ===== Giao diện TỐI: đen – neon xanh/tím kiểu gaming ===== */
+  :root[data-theme=dark] {
+    --bg: #05080f; --bg2: #0b1222; --card: rgba(14,20,34,.8); --field: #0a0f1c; --text: #e6edf7; --muted: #8b98ad;
+    --line: #1f2b42; --accent: #22d3ee; --accent2: #c084fc; --accent-text: #04121a; --ok: #4ade80; --bad: #f87171; --warn: #fbbf24;
+    --soft: #10233a; --head: rgba(8,12,22,.92); --shadow: 0 8px 30px rgba(0,0,0,.5);
+    --glow: 0 0 26px rgba(34,211,238,.08);
+    --grid: rgba(34,211,238,.06); --fx: 34,211,238; --fx2: 192,132,252; --orb1: rgba(34,211,238,.16); --orb2: rgba(192,132,252,.15);
+    --c0: #22d3ee; --c1: #fbbf24; --c2: #fb7185; --c3: #4ade80;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html { background: var(--bg); }
+  body { margin: 0; color: var(--text); font: 14px/1.5 "Segoe UI", system-ui, sans-serif; min-height: 100vh; }
+
+  /* ----- Nền công nghệ: lưới + quầng sáng trôi + mạng hạt (canvas) ----- */
+  .bg { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none;
+        background:
+          linear-gradient(var(--grid) 1px, transparent 1px) 0 0 / 44px 44px,
+          linear-gradient(90deg, var(--grid) 1px, transparent 1px) 0 0 / 44px 44px,
+          radial-gradient(1200px 700px at 85% -10%, var(--bg2), transparent 70%), var(--bg); }
+  .orb { position: absolute; width: 46vmax; height: 46vmax; border-radius: 50%; will-change: transform; }
+  .orb.a { left: -14vmax; top: -18vmax; background: radial-gradient(circle, var(--orb1), transparent 62%); animation: float1 26s ease-in-out infinite alternate; }
+  .orb.b { right: -16vmax; bottom: -20vmax; background: radial-gradient(circle, var(--orb2), transparent 62%); animation: float2 32s ease-in-out infinite alternate; }
+  @keyframes float1 { to { transform: translate(16vmax, 10vmax) scale(1.15); } }
+  @keyframes float2 { to { transform: translate(-14vmax, -12vmax) scale(1.2); } }
+  #fx { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .fx-off .orb { animation: none; }
+  @media (prefers-reduced-motion: reduce) { .orb { animation: none; } }
+  header, main { position: relative; z-index: 1; }
+
+  header { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; padding: 8px 24px;
+           background: var(--head); border-bottom: 1px solid var(--line); box-shadow: var(--shadow); position: sticky; top: 0; z-index: 5; }
+  :root[data-theme=dark] header { border-image: linear-gradient(90deg, transparent, var(--accent), var(--accent2), transparent) 1; }
+  .brand { display: flex; align-items: center; gap: 12px; margin-right: auto; }
+  .brand img { height: 54px; width: auto; display: block; cursor: zoom-in; transition: transform .25s;
+               filter: drop-shadow(0 3px 8px rgba(0,0,0,.25)); }
+  .brand img:hover { transform: scale(1.08) rotate(-2deg); }
+  .brand .name { font: italic 900 21px/1 "Segoe UI", "Arial Black", system-ui, sans-serif; letter-spacing: .02em; text-transform: uppercase; }
+  :root[data-theme=dark] .brand .name { background: linear-gradient(90deg, var(--accent), var(--accent2)); -webkit-background-clip: text;
+               background-clip: text; color: transparent; }
+  .brand .sub { color: var(--muted); font-size: 12px; margin-top: 4px; }
+  .brand .sub b { color: var(--accent); }
+  .pill { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
+  .dot.ok { background: var(--ok); box-shadow: 0 0 8px var(--ok); } .dot.bad { background: var(--bad); }
+  .eng { padding: 3px 10px; border-radius: 999px; font-weight: 700; font-size: 12px; border: 1px solid currentColor; white-space: nowrap; }
+  .eng.gpu { color: var(--ok); } .eng.spill { color: var(--warn); } .eng.cpu { color: var(--bad); }
+  .eng.idle, .eng.unknown { color: var(--muted); font-weight: 400; }
+  .warnbox { border-left: 4px solid var(--warn); }
+  .warnbox.cpu { border-left-color: var(--bad); }
+  .warnbox b.t { display: block; margin-bottom: 6px; }
+  .warnbox ul { margin: 6px 0 0; padding-left: 18px; }
+  .tools { display: flex; gap: 8px; align-items: center; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .seg button { border: 0; border-radius: 0; padding: 7px 10px; font-weight: 700; font-size: 12px; background: transparent; color: var(--muted); box-shadow: none; }
+  .seg button.on { background: var(--accent); color: var(--accent-text); }
+  .icon { width: 34px; height: 34px; padding: 0; font-size: 16px; line-height: 1; border-radius: 8px; }
+  .icon.off { opacity: .45; }
+
+  main { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 16px; padding: 16px 24px; max-width: 1500px; margin: 0 auto; }
+  @media (max-width: 900px) { main { grid-template-columns: minmax(0, 1fr); padding: 16px; } header { padding: 8px 16px; } }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; margin-bottom: 16px;
+          box-shadow: var(--shadow), var(--glow); }
+  h2 { font-size: 15px; margin: 0 0 12px; }
+  :root[data-theme=dark] h2 { color: var(--accent); letter-spacing: .03em; text-transform: uppercase; font-size: 13px; }
+  label { display: block; font-weight: 600; margin: 12px 0 4px; }
+  .help { color: var(--muted); font-size: 12px; font-weight: 400; }
+  input[type=text], input[type=number], select, textarea {
+    width: 100%; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px;
+    background: var(--field); color: var(--text); font: inherit; }
+  input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .check { display: flex; gap: 8px; align-items: center; font-weight: 600; }
+  input[type=checkbox] { accent-color: var(--accent); }
+  button { padding: 8px 14px; border-radius: 6px; border: 1px solid var(--line); background: var(--card);
+           color: var(--text); font: inherit; cursor: pointer; transition: border-color .15s, transform .1s; }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:active:not(:disabled) { transform: translateY(1px); }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 700; }
+  :root[data-theme=dark] button.primary { background: linear-gradient(90deg, var(--accent), var(--accent2)); border-color: transparent;
+           box-shadow: 0 0 18px rgba(34,211,238,.35); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .quick { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+  .quick button { flex: 1; padding: 6px 8px; font-size: 13px; white-space: nowrap; }
+  .row { display: flex; gap: 8px; margin-top: 16px; }
+  .row .primary { flex: 1; }
+  .bar { height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; margin: 8px 0; }
+  .bar > div { height: 100%; width: 0; background: linear-gradient(90deg, var(--accent), var(--accent2)); transition: width .4s; }
+  pre { margin: 0; max-height: 220px; overflow: auto; background: var(--field); border-radius: 6px; padding: 10px;
+        font: 12px/1.5 Consolas, monospace; white-space: pre-wrap; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(165px, 1fr)); gap: 10px; }
+  .tile { background: var(--field); border: 1px solid transparent; border-radius: 8px; padding: 10px 12px; }
+  .tile:first-child { background: var(--soft); border-color: var(--accent); }
+  .tile .l { color: var(--muted); font-size: 12px; }
+  .tile .v { font-size: 22px; font-weight: 700; }
+  :root[data-theme=dark] .tile .v { color: var(--accent); text-shadow: 0 0 14px rgba(34,211,238,.35); }
+  .tile .u { font-size: 12px; color: var(--muted); font-weight: 400; margin-left: 4px; text-shadow: none; }
+  .scroll { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { color: var(--muted); font-weight: 600; }
+  tr.click { cursor: pointer; } tr.click:hover { background: var(--field); } tr.sel { background: var(--soft); }
+  .muted { color: var(--muted); } .err { color: var(--bad); }
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .legend i { display: inline-block; width: 10px; height: 3px; margin-right: 5px; vertical-align: middle; }
+  svg { width: 100%; height: 180px; display: block; background: var(--field); border-radius: 6px; }
+  .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px; }
+  .shot { border: 2px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--field); }
+  .shot.pending { border-color: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
+  @keyframes pulse { 50% { border-color: var(--line); } }
+  .filebox { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin-top: 12px; padding: 10px 12px;
+             background: var(--soft); border-radius: 8px; word-break: break-all; }
+  .shot img { width: 100%; aspect-ratio: 1; object-fit: contain; display: block; background: #fff; cursor: zoom-in; }
+  .shot .cap { padding: 8px 10px; font-size: 12.5px; }
+  .shot .cap b { display: block; margin-bottom: 4px; }
+  .chk.ok { color: var(--ok); } .chk.bad { color: var(--bad); font-weight: 600; }
+  #zoom { position: fixed; inset: 0; background: rgba(0,0,0,.85); display: none; align-items: center;
+          justify-content: center; cursor: zoom-out; z-index: 10; }
+  #zoom.on { display: flex; }
+  #zoom img { max-width: 94vw; max-height: 94vh; background: #fff; border-radius: 8px; }
+  [hidden] { display: none !important; }
+  /* ----- So sánh các lần chạy ----- */
+  .cmpbar { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin: -4px 0 10px; }
+  .cmpbar .muted { margin-right: auto; font-size: 12.5px; }
+  select:disabled { opacity: .5; cursor: not-allowed; }
+  .fit { margin-top: 6px; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--line); border-left: 4px solid var(--muted);
+         background: var(--field); font-size: 12.5px; line-height: 1.45; }
+  .fit b { display: block; }
+  .fit.ok { border-left-color: var(--ok); } .fit.ok b { color: var(--ok); }
+  .fit.tight { border-left-color: var(--warn); } .fit.tight b { color: var(--warn); }
+  .fit.warn { border-left-color: var(--warn); } .fit.warn b { color: var(--warn); }
+  .fit.bad { border-left-color: var(--bad); } .fit.bad b { color: var(--bad); }
+  .fit .muted { margin-top: 3px; font-size: 11.5px; }
+  #liveCard { border-color: var(--accent); }
+  #liveCard .last { font-family: Consolas, monospace; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #live { max-height: 62vh; overflow: auto; }
+  .q { display: inline-block; margin-left: 4px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--accent); color: var(--accent);
+       font-size: 11px; font-weight: 700; letter-spacing: .02em; vertical-align: middle; white-space: nowrap; }
+  .pick { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; margin: 0; }
+  .pick input { width: 16px; height: 16px; cursor: pointer; }
+  .pick .ord { display: inline-block; min-width: 14px; font-size: 11px; font-weight: 700; color: var(--accent); }
+  #compare { position: relative; z-index: 1; padding: 16px 24px; max-width: 1500px; margin: 0 auto; }
+  .cmphead { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin-bottom: 10px; }
+  .cmphead h2 { margin: 0; font-size: 17px; }
+  table.cmp th, table.cmp td { white-space: normal; vertical-align: top; min-width: 190px; }
+  table.cmp th:first-child, table.cmp td:first-child { min-width: 170px; font-weight: 600; color: var(--text); }
+  table.cmp th.base, table.cmp td.base { background: var(--soft); }
+  table.cmp th { color: var(--text); font-weight: 400; }
+  table.cmp th .hd { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
+  table.cmp th .hd button { padding: 3px 8px; font-size: 12px; }
+  table.cmp th .hd .x { margin-left: auto; }
+  table.cmp th .m { font-weight: 700; font-size: 14px; word-break: break-word; }
+  table.cmp .tag { background: var(--accent); color: var(--accent-text); border-radius: 999px; padding: 3px 10px; font-size: 12px; font-weight: 700; }
+  table.cmp tr.grp td { background: var(--field); color: var(--accent); font-weight: 700; text-transform: uppercase; letter-spacing: .04em; font-size: 12.5px; }
+  table.cmp tr.grp label { display: inline-flex; gap: 6px; align-items: center; margin: 0 0 0 14px; text-transform: none; letter-spacing: 0; color: var(--muted); font-weight: 400; }
+  table.cmp tr.grp input { width: 90px; padding: 3px 6px; }
+  .cv { font-size: 17px; font-weight: 700; } .cv .u { font-size: 12px; color: var(--muted); font-weight: 400; margin-left: 4px; }
+  .cbar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; margin: 5px 0; }
+  .cbar > div { height: 100%; background: var(--muted); }
+  .cbar.base > div { background: var(--accent); } .cbar.good > div { background: var(--ok); } .cbar.bad > div { background: var(--bad); }
+  .cp { font-size: 12.5px; color: var(--muted); } .cp b { font-size: 14px; color: var(--text); margin-right: 4px; }
+  .cp.good span { color: var(--ok); font-weight: 600; } .cp.bad span { color: var(--bad); font-weight: 600; }
+  .cost { margin-top: 4px; font-size: 12.5px; color: var(--warn); font-weight: 600; }
+  h3 { font-size: 13px; margin: 18px 0 8px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+</style>
+</head>
+<body>
+<div class="bg" aria-hidden="true"><div class="orb a"></div><div class="orb b"></div><canvas id="fx"></canvas></div>
+<header>
+  <div class="brand">
+    <img id="logo" src="/logo-mark.png" alt="Tech by Lân" data-full="/logo.png">
+    <div><div class="name">Tech by Lân</div><div class="sub"><b>AI Bench</b> · <span data-i18n="tagline"></span></div></div>
+  </div>
+  <span class="pill"><span class="dot" id="lmDot"></span><span id="lmText">LM Studio…</span>
+    <button id="lmStart" hidden data-i18n="lmStartBtn"></button></span>
+  <span class="pill" id="gpuText">GPU…</span>
+  <span class="eng unknown" id="engText" hidden></span>
+  <div class="tools">
+    <div class="seg" role="group" aria-label="Language"><button id="langVi">VI</button><button id="langEn">EN</button></div>
+    <button class="icon" id="fxBtn">✨</button>
+    <button class="icon" id="themeBtn"></button>
+  </div>
+</header>
+<main>
+  <div>
+    <div class="card warnbox" id="engWarn" hidden></div>
+    <div class="card">
+      <h2 data-i18n="pickTest"></h2>
+      <select id="module"></select>
+      <div class="help" id="moduleDesc" style="margin-top:6px"></div>
+      <form id="form"></form>
+      <div class="row">
+        <button class="primary" id="run" data-i18n="run"></button>
+        <button id="cancel" hidden data-i18n="cancel"></button>
+      </div>
+    </div>
+    <div class="card" id="jobCard" hidden>
+      <h2><span data-i18n="progress"></span> <span class="muted" id="jobPct"></span></h2>
+      <div class="bar"><div id="jobBar"></div></div>
+      <pre id="jobLog"></pre>
+    </div>
+  </div>
+  <div>
+    <div class="card" id="liveCard" hidden>
+      <h2><span id="liveTitle"></span> <span class="muted" id="livePct"></span></h2>
+      <div class="bar"><div id="liveBar"></div></div>
+      <div class="last" id="liveLast"></div>
+      <div id="live"></div>
+    </div>
+    <div class="card" id="resultCard">
+      <h2 id="resultTitle"></h2>
+      <div id="result" class="muted"></div>
+    </div>
+    <div class="card">
+      <h2 data-i18n="history"></h2>
+      <div class="cmpbar"><span class="muted" data-i18n="cmpHint"></span>
+        <button id="cmpClear" hidden data-i18n="cmpClear"></button><button class="primary" id="cmpGo" disabled></button></div>
+      <div class="scroll" id="history"></div>
+    </div>
+  </div>
+</main>
+<section id="compare" hidden></section>
+<div id="zoom"><img alt=""></div>
+<script>
+const $ = id => document.getElementById(id);
+const store = { get: k => { try { return localStorage.getItem("aibench." + k); } catch (e) { return null; } },
+                set: (k, v) => { try { localStorage.setItem("aibench." + k, v); } catch (e) {} } };
+let lang = store.get("lang") === "en" ? "en" : "vi";
+
+// ----- Chữ của giao diện (2 ngôn ngữ) -----
+const T = {
+  vi: {
+    tagline: "Benchmark GPU chạy AI", pickTest: "Chọn bài test", run: "Chạy", cancel: "Huỷ", progress: "Tiến trình",
+    result: "Kết quả", history: "Lịch sử", lmStartBtn: "Khởi động server",
+    noResult: "Chưa có kết quả. Chọn model rồi bấm Chạy, hoặc chọn một lần chạy trong lịch sử.",
+    lmUp: n => `LM Studio đang chạy (${n} model)`, lmDown: "LM Studio chưa bật server", lost: "Mất kết nối AI Bench",
+    lmStarting: "Đang khởi động LM Studio…", gpuNone: "Không tìm thấy GPU NVIDIA (nvidia-smi)", gpuPower: w => `đang dùng ${w} W`,
+    loaded: " (đã nạp)", vision: " · thị giác", noModel: "(chưa có model – hãy bật server LM Studio)",
+    runN: (n, u) => `Chạy ${n} ${u}`, running: "Đang chạy…",
+    liveTitle: "AI đang xem (ảnh mới nhất ở đầu) · bấm vào ảnh để phóng to",
+    galleryTitle: "Ảnh và kết quả AI đọc được · bấm vào ảnh để phóng to", answer: "Trả lời", openFile: "Mở file",
+    pendingImg: "AI đang xem ảnh này…", expected: "đáp án", aiSaid: "AI trả lời", peak: "cao nhất",
+    chartNote: s => `Mỗi đường co theo giá trị cao nhất của nó · trục ngang ${s} giây`, ranFor: s => `chạy ${s} giây`,
+    histEmpty: "Chưa có lần chạy nào.", cols: ["Thời gian", "Bài test", "Model", "GPU", "Kết quả chính"],
+    toDark: "Chuyển sang giao diện tối", toLight: "Chuyển sang giao diện sáng",
+    engGpu: e => `⚡ Chạy bằng GPU (${e.backend})`, engSpill: "⚠ GPU bị tràn VRAM", engCpu: "🐢 Chạy bằng CPU",
+    engIdle: "Chưa nạp model", engLayers: n => `${n} lớp trên GPU`, engAll: "toàn bộ lớp trên GPU", engCtx: n => `ngữ cảnh ${n}`,
+    engShared: g => `tràn sang RAM ${g} GB`, engRan: "Model chạy bằng",
+    liveRun: "⏳ Đang chạy", liveHint: "Bạn vẫn xem được các kết quả cũ ở bên dưới trong lúc bài test chạy.",
+    fitOkT: "✓ Phù hợp với phần cứng", fitTightT: "△ Vừa sát VRAM", fitWarnT: "⚠ Không phù hợp – sẽ chạy rất chậm", fitBadT: "✗ Quá lớn so với máy này",
+    fitOk: (need, vram) => `Cần khoảng ${need} GB, GPU có ${vram} GB VRAM.`,
+    fitTight: (need, vram) => `Cần khoảng ${need} GB trên ${vram} GB VRAM. Hãy đóng các ứng dụng đang dùng GPU trước khi chạy.`,
+    fitCtx: (need, vram, ctx, max) => `Model vừa VRAM, nhưng đang nạp với ngữ cảnh ${ctx} token nên cần khoảng ${need} GB, vượt ${vram} GB VRAM. Phần dư tràn sang RAM và tốc độ giảm rất mạnh. ` +
+      `Trong LM Studio, giảm Context Length xuống khoảng ${max} token rồi nạp lại model.`,
+    fitOver: (need, vram) => `Riêng model đã cần khoảng ${need} GB, GPU chỉ có ${vram} GB VRAM. Phần dư phải chạy bằng RAM/CPU nên rất chậm. Nên chọn model hoặc mức nén nhỏ hơn.`,
+    fitNo: (need, vram, ram) => `Cần khoảng ${need} GB, vượt cả VRAM (${vram} GB) lẫn RAM (${ram} GB). Nhiều khả năng không nạp được.`,
+    fitSpill: g => `Đo thực tế: model này đang nạp và đã tràn ${g} GB từ VRAM sang RAM. Kết quả test sẽ thấp hơn nhiều so với khả năng của GPU. Giảm Context Length trong LM Studio rồi nạp lại.`,
+    fitCpu: "Đo thực tế: model này đang nạp và chạy bằng CPU, không dùng GPU.",
+    fitCtxTip: max => `Để Context Length trong LM Studio không quá khoảng ${max} token, nếu cao hơn sẽ tràn VRAM.`,
+    fitEst: size => `Ước lượng từ dung lượng file model (${size} GB), sai số có thể vài GB.`,
+    fitConfirm: msg => `Model này có thể không phù hợp với phần cứng:\n\n${msg}\n\nBạn vẫn muốn chạy test?`,
+    spillTitle: "Model không nằm vừa trong VRAM – đang chạy chậm gần như CPU",
+    spillBody: (e, need, total) => `${e.model || "Model"} cần khoảng ${need} GB (model + ngữ cảnh ${e.ctx ? fmt(e.ctx) : "?"} token) nhưng GPU chỉ có ${total} GB. ` +
+      `Driver đã đẩy ${gb(e.shared_mb)} GB sang RAM hệ thống, nên GPU phải đọc qua RAM và tốc độ giảm rất mạnh.`,
+    spillFix: ["Giảm độ dài ngữ cảnh (Context Length) của model trong LM Studio, ví dụ 8.192–32.768 thay vì để tối đa.",
+               "Hoặc chọn model / mức lượng tử hóa nhỏ hơn dung lượng VRAM.", "Sau khi đổi, gỡ model rồi nạp lại."],
+    cpuTitle: "Model đang chạy bằng CPU, không dùng GPU",
+    cpuBody: e => e.backend === "CPU" ? "LM Studio đang dùng backend chỉ chạy CPU. Vào LM Studio → Settings → Runtime và chọn bản llama.cpp CUDA."
+      : "Số lớp đưa lên GPU (GPU Offload) đang bằng 0. Trong LM Studio, mở cài đặt nạp model và kéo GPU Offload lên tối đa.",
+    cmpHint: "Tick tối đa 5 lần chạy để so sánh. Lần tick đầu tiên là mốc 100%.", cmpBtn: n => `So sánh hiệu năng (${n}/5)`,
+    cmpClear: "Bỏ chọn", cmpFull: "Đã chọn đủ 5 kết quả", cmpTick: "Chọn để đưa vào bảng so sánh",
+    cmpTitle: "So sánh hiệu năng", cmpBack: "← Quay lại", cmpCrit: "Tiêu chí", cmpBase: "Mốc 100%", cmpSetBase: "Đặt làm mốc",
+    cmpRemove: "Bỏ khỏi bảng so sánh", cmpSame: "tương đương",
+    cmpNote: "Kết quả đầu tiên là mốc 100%; các kết quả sau được tính theo mốc đó.",
+    cmpMixed: "Bạn đang so sánh các bài test khác nhau: chỉ tiêu chí trùng tên mới tính được phần trăm.",
+    stronger: n => `mạnh hơn ${n}%`, weaker: n => `yếu hơn ${n}%`, lowerGood: n => `thấp hơn ${n}% · tốt hơn`,
+    higherBad: n => `cao hơn ${n}% · kém hơn`, higherN: n => `cao hơn ${n}%`, lowerN: n => `thấp hơn ${n}%`,
+    grpPerf: "Hiệu năng", grpEnergy: "Điện năng", grpHw: "Phần cứng", priceLabel: "Giá điện giả định", priceUnit: "đ/kWh",
+    perHour: "/giờ", moneyUnit: "đ", costTip: "Tiền điện quy đổi theo giá điện giả định",
+    fxOn: "Tắt hiệu ứng nền động", fxOff: "Bật hiệu ứng nền động", logoTip: "Bấm để xem logo",
+  },
+  en: {
+    tagline: "AI GPU benchmark", pickTest: "Choose a test", run: "Run", cancel: "Cancel", progress: "Progress",
+    result: "Results", history: "History", lmStartBtn: "Start server",
+    noResult: "No results yet. Pick a model and press Run, or select a past run from the history.",
+    lmUp: n => `LM Studio is running (${n} models)`, lmDown: "LM Studio server is not running", lost: "Lost connection to AI Bench",
+    lmStarting: "Starting LM Studio…", gpuNone: "No NVIDIA GPU found (nvidia-smi)", gpuPower: w => `drawing ${w} W`,
+    loaded: " (loaded)", vision: " · vision", noModel: "(no models – start the LM Studio server)",
+    runN: (n, u) => `Run ${n} ${u}`, running: "Running…",
+    liveTitle: "What the AI is looking at (newest first) · click an image to enlarge",
+    galleryTitle: "Images and what the AI read · click an image to enlarge", answer: "Answer", openFile: "Open file",
+    pendingImg: "The AI is looking at this image…", expected: "expected", aiSaid: "AI answered", peak: "peak",
+    chartNote: s => `Each line is scaled to its own peak · horizontal axis spans ${s} s`, ranFor: s => `ran ${s} s`,
+    histEmpty: "No runs yet.", cols: ["Time", "Test", "Model", "GPU", "Key results"],
+    toDark: "Switch to dark theme", toLight: "Switch to light theme",
+    engGpu: e => `⚡ Running on GPU (${e.backend})`, engSpill: "⚠ GPU out of VRAM", engCpu: "🐢 Running on CPU",
+    engIdle: "No model loaded", engLayers: n => `${n} layers on GPU`, engAll: "all layers on GPU", engCtx: n => `context ${n}`,
+    engShared: g => `${g} GB spilled to RAM`, engRan: "Model ran on",
+    liveRun: "⏳ Running", liveHint: "You can still browse past results below while the test runs.",
+    fitOkT: "✓ Fits this hardware", fitTightT: "△ Barely fits in VRAM", fitWarnT: "⚠ Poor fit – it will run very slowly", fitBadT: "✗ Too large for this machine",
+    fitOk: (need, vram) => `Needs about ${need} GB; the GPU has ${vram} GB of VRAM.`,
+    fitTight: (need, vram) => `Needs about ${need} GB of ${vram} GB VRAM. Close other apps that use the GPU before running.`,
+    fitCtx: (need, vram, ctx, max) => `The model fits in VRAM, but it is loaded with a ${ctx}-token context, so it needs about ${need} GB, more than the ${vram} GB of VRAM. The rest spills into RAM and speed drops sharply. ` +
+      `In LM Studio, lower Context Length to about ${max} tokens and reload the model.`,
+    fitOver: (need, vram) => `The model alone needs about ${need} GB; the GPU only has ${vram} GB of VRAM. The rest has to run from RAM/CPU, which is very slow. Pick a smaller model or quantization.`,
+    fitNo: (need, vram, ram) => `Needs about ${need} GB, more than VRAM (${vram} GB) and RAM (${ram} GB). It will most likely fail to load.`,
+    fitSpill: g => `Measured: this model is loaded and ${g} GB has spilled from VRAM into RAM. Test results will be far below what the GPU can do. Lower Context Length in LM Studio and reload.`,
+    fitCpu: "Measured: this model is loaded and running on CPU, not the GPU.",
+    fitCtxTip: max => `Keep Context Length in LM Studio at or below about ${max} tokens; higher will overflow VRAM.`,
+    fitEst: size => `Estimated from the model file size (${size} GB); may be off by a few GB.`,
+    fitConfirm: msg => `This model may not suit your hardware:\n\n${msg}\n\nRun the test anyway?`,
+    spillTitle: "The model does not fit in VRAM – it is running almost as slowly as on CPU",
+    spillBody: (e, need, total) => `${e.model || "The model"} needs about ${need} GB (model + ${e.ctx ? fmt(e.ctx) : "?"}-token context) but the GPU only has ${total} GB. ` +
+      `The driver moved ${gb(e.shared_mb)} GB into system RAM, so the GPU has to read through RAM and speed drops sharply.`,
+    spillFix: ["Lower the model's Context Length in LM Studio, e.g. 8,192–32,768 instead of the maximum.",
+               "Or pick a model / quantization smaller than your VRAM.", "Then unload and reload the model."],
+    cpuTitle: "The model is running on CPU, not the GPU",
+    cpuBody: e => e.backend === "CPU" ? "LM Studio is using a CPU-only backend. In LM Studio → Settings → Runtime, select the CUDA llama.cpp runtime."
+      : "GPU Offload is set to 0 layers. In LM Studio's model load settings, raise GPU Offload to the maximum.",
+    cmpHint: "Tick up to 5 runs to compare. The first one you tick is the 100% baseline.", cmpBtn: n => `Compare performance (${n}/5)`,
+    cmpClear: "Clear", cmpFull: "5 results already selected", cmpTick: "Select to add to the comparison",
+    cmpTitle: "Performance comparison", cmpBack: "← Back", cmpCrit: "Metric", cmpBase: "Baseline 100%", cmpSetBase: "Set as baseline",
+    cmpRemove: "Remove from comparison", cmpSame: "about the same",
+    cmpNote: "The first result is the 100% baseline; the others are measured against it.",
+    cmpMixed: "You are comparing different tests: only metrics with the same name get a percentage.",
+    stronger: n => `${n}% stronger`, weaker: n => `${n}% weaker`, lowerGood: n => `${n}% lower · better`,
+    higherBad: n => `${n}% higher · worse`, higherN: n => `${n}% higher`, lowerN: n => `${n}% lower`,
+    grpPerf: "Performance", grpEnergy: "Power & energy", grpHw: "Hardware", priceLabel: "Assumed electricity price", priceUnit: "VND/kWh",
+    perHour: "/hour", moneyUnit: "VND", costTip: "Electricity cost at the assumed price",
+    fxOn: "Turn off animated background", fxOff: "Turn on animated background", logoTip: "Click to view the logo",
+  },
+};
+const t = (k, ...a) => { const v = T[lang][k]; return typeof v === "function" ? v(...a) : v; };
+
+// ----- Chữ do server/module trả về (tiếng Việt) → tiếng Anh. Dịch ở giao diện nên kết quả cũ trong lịch sử cũng đổi được. -----
+// Thêm module mới: bổ sung các chuỗi tiếng Việt của module vào đây; chuỗi chưa có sẽ hiện nguyên tiếng Việt.
+const D = {
+  // tên + mô tả module
+  "Benchmark GPU (LLM)": "GPU Benchmark (LLM)",
+  "Đo tốc độ sinh token, độ trễ, tốc độ đọc prompt, thông lượng song song, VRAM, nhiệt độ và công suất của GPU.":
+    "Measures token generation speed, latency, prompt reading speed, parallel throughput, VRAM, temperature and GPU power draw.",
+  "Benchmark phân tích hình ảnh": "Image Analysis Benchmark",
+  "Gửi ảnh test ở nhiều độ phân giải tới model thị giác; đo thời gian xử lý ảnh, tốc độ sinh và độ chính xác (đếm hình, đọc chữ).":
+    "Sends test images at several resolutions to a vision model; measures image processing time, generation speed and accuracy (counting shapes, reading text).",
+  "Phân tích hóa đơn bán lẻ": "Retail Invoice Analysis",
+  "Đọc ảnh hóa đơn trong thư mục, hiện bảng thống kê và ghi ra file Excel theo mẫu.":
+    "Reads invoice images from a folder, shows a summary table and writes an Excel file based on the template.",
+  // tham số
+  "Model LLM trong LM Studio dùng để đo": "The LM Studio LLM to benchmark",
+  "Số lần lặp mỗi kịch bản": "Runs per scenario", "Lấy trung vị để giảm nhiễu": "The median is used to reduce noise",
+  "Số token sinh (kịch bản ngắn)": "Tokens to generate (short scenario)", "Kịch bản sinh dài dùng gấp 3 lần": "The long-generation scenario uses 3× this",
+  "Số yêu cầu song song": "Parallel requests", "Đặt 1 để bỏ qua kịch bản song song": "Set to 1 to skip the parallel scenario",
+  "Gỡ các model khác trước khi nạp": "Unload other models before loading", "Giải phóng VRAM để đo chính xác": "Frees VRAM for accurate measurement",
+  "Model thị giác": "Vision model", "Chỉ hiện các model đọc được ảnh": "Only models that can read images are listed",
+  "Độ phân giải (px, cách nhau dấu phẩy)": "Resolutions (px, comma-separated)",
+  "Ảnh vuông; ảnh lớn có thể bị LM Studio thu nhỏ trước khi đưa vào model": "Square images; LM Studio may downscale large images before they reach the model",
+  "Số ảnh mỗi độ phân giải": "Images per resolution", "Mỗi ảnh có nội dung ngẫu nhiên khác nhau": "Each image has different random content",
+  "Model càng lớn đọc chữ viết tay càng tốt": "Larger models read handwriting better",
+  "Thư mục ảnh hóa đơn": "Invoice image folder", "Thư mục chứa file Excel mẫu": "Excel template folder", "Thư mục lưu kết quả": "Output folder",
+  "Số lượng hóa đơn cần chạy": "Number of invoices to process",
+  "Giới hạn token mỗi hóa đơn": "Token limit per invoice", "0 = không giới hạn: model suy nghĩ và viết tới khi xong": "0 = unlimited: the model thinks and writes until it is done",
+  "0 = chạy tất cả ảnh trong thư mục (theo thứ tự tên file)": "0 = process every image in the folder (in file-name order)",
+  // đơn vị
+  "điểm": "pts", "giây": "s", "ảnh/phút": "images/min", "dòng": "rows", "hóa đơn": "invoices", "đ": "₫",
+  // ô tóm tắt
+  "Điểm tổng": "Overall score", "Tốc độ sinh": "Generation speed", "Độ trễ token đầu": "Time to first token",
+  "Tốc độ đọc prompt": "Prompt reading speed", "VRAM đỉnh": "Peak VRAM", "GPU sử dụng (sinh dài)": "GPU usage (long generation)",
+  "Nhiệt độ cao nhất": "Peak temperature", "Công suất TB (sinh dài)": "Avg power (long generation)", "Hiệu suất": "Efficiency",
+  "Điện mỗi 1.000 token (sinh dài)": "Energy per 1,000 tokens (long generation)", "Điện GPU tiêu thụ (phần đo)": "GPU energy used (measured part)",
+  "Điện GPU tiêu thụ (cả lần chạy)": "GPU energy used (whole run)", "Thời gian nạp model": "Model load time",
+  "Tốc độ xử lý": "Processing speed", "Độ chính xác": "Accuracy", "Đếm hình đúng": "Shapes counted correctly",
+  "Đọc mã lớn đúng": "Large code read correctly", "Đọc số nhỏ đúng": "Small digits read correctly",
+  "GPU sử dụng TB": "Avg GPU usage", "Công suất TB": "Avg power", "Điện mỗi ảnh": "Energy per image",
+  "Hóa đơn đã đọc": "Invoices read", "Số dòng hàng hóa": "Line items", "Tổng thành tiền": "Total amount",
+  "Thời gian mỗi hóa đơn": "Time per invoice", "Điện mỗi hóa đơn": "Energy per invoice",
+  // bảng
+  "Chi tiết từng kịch bản (trung vị)": "Per-scenario details (median)", "Chi tiết theo độ phân giải (trung vị)": "Details by resolution (median)",
+  "Bảng thống kê hóa đơn (giống file Excel)": "Invoice table (same as the Excel file)",
+  "Kịch bản": "Scenario", "Token vào": "Input tokens", "Token ra": "Output tokens", "Sinh (tok/s)": "Generation (tok/s)",
+  "Đọc prompt (tok/s)": "Prompt read (tok/s)", "GPU TB (%)": "Avg GPU (%)", "VRAM đỉnh (MB)": "Peak VRAM (MB)",
+  "Công suất TB (W)": "Avg power (W)", "Điện (Wh)": "Energy (Wh)", "Ảnh": "Image", "Tới token đầu (ms)": "To first token (ms)",
+  "Tổng (giây)": "Total (s)", "Đếm hình": "Shape count", "Mã lớn": "Large code", "Số nhỏ": "Small digits",
+  "Sinh ngắn": "Short generation", "Ngữ cảnh dài": "Long context", "Sinh dài": "Long generation",
+  // biểu đồ
+  "GPU theo thời gian": "GPU over time", "GPU sử dụng": "GPU usage", "Nhiệt độ": "Temperature", "Công suất": "Power",
+  // thẻ ảnh
+  "Đếm hình tròn": "Circle count", "(không trả lời)": "(no answer)", "Mã hóa đơn": "Invoice no.", "Đơn vị bán": "Seller",
+  "Đơn vị mua": "Buyer", "Số dòng hàng": "Line items", "Thành tiền": "Amount", "Lỗi": "Error", "File Excel thống kê": "Excel summary file",
+};
+// Câu có phần thay đổi (log, chú thích ảnh, lỗi): thay từng cụm.
+const R = [
+  [/Model (.+) đã nạp sẵn \(bỏ qua đo thời gian nạp\)/, "Model $1 already loaded (load time not measured)"],
+  [/Gỡ các model đang nạp\.\.\./, "Unloading loaded models..."],
+  [/Nạp model (.+)\.\.\./, "Loading model $1..."],
+  [/Nạp xong sau ([\d.]+) giây/, "Loaded in $1 s"],
+  [/Chạy làm nóng \(nạp bộ mã hoá ảnh\)\.\.\./, "Warm-up run (loading the image encoder)..."],
+  [/Chạy làm nóng\.\.\./, "Warm-up run..."],
+  [/Sinh ngắn/, "Short generation"], [/Ngữ cảnh dài/, "Long context"], [/Sinh dài/, "Long generation"], [/Song song ×/, "Parallel ×"],
+  [/tổng ([\d.]+) tok\/s \((\d+) token trong ([\d.]+) giây\)/, "$1 tok/s total ($2 tokens in $3 s)"],
+  [/(\d+) token vào/, "$1 input tokens"], [/đếm\/mã\/số nhỏ/, "count/code/small digits"],
+  [/(\d+) ảnh hóa đơn · file mẫu:/, "$1 invoice images · template:"],
+  [/: hóa đơn (.+?), (\d+) dòng,/, ": invoice $1, $2 rows,"],
+  [/Đã ghi Excel:/, "Excel written:"], [/Hoàn tất/, "Done"], [/Đã huỷ/, "Cancelled"], [/LỖI/, "ERROR"],
+  [/ảnh chiếm (\d+) token/, "image used $1 tokens"], [/ · ảnh (\d+)\/(\d+)/, " · image $1/$2"],
+  [/^\/ (\d+) ảnh$/, "/ $1 images"], [/^Điện (\d+) ảnh \(Wh\)$/, "Energy for $1 images (Wh)"],
+  [/([\d.,]+) giây/g, "$1 s"],
+  [/Đang có một bài test chạy, hãy đợi hoặc huỷ nó trước/, "A test is already running — wait for it or cancel it first"],
+  [/Chưa chọn model/, "No model selected"], [/Không có module này/, "Unknown module"],
+  [/Không có thư mục ảnh hóa đơn:/, "Invoice image folder not found:"],
+  [/Không có ảnh hóa đơn nào trong/, "No invoice images in"],
+  [/Không tìm thấy file Excel mẫu \(\.xlsx\) trong/, "No Excel template (.xlsx) found in"],
+  [/LM Studio không có model/, "LM Studio has no model"], [/Không tìm thấy lệnh 'lms' của LM Studio/, "LM Studio's 'lms' command was not found"],
+  [/Cần ít nhất một độ phân giải, ví dụ:/, "At least one resolution is required, e.g.:"],
+  [/Model không trả về JSON/, "The model did not return JSON"],
+  [/model suy nghĩ hết (\d+) token mà chưa trả lời, hỏi lại với chế độ suy nghĩ tắt/, "the model spent all $1 tokens thinking without answering; asking again with thinking off"],
+  [/model suy nghĩ lặp vòng \(sau (\d+) token\), hỏi lại với chế độ suy nghĩ tắt/, "the model got stuck in a thinking loop (after $1 tokens); asking again with thinking off"],
+  [/Model lặp vòng, không trả lời xong/, "The model looped and never finished answering"],
+  [/Model không trả lời \(hết giới hạn token\)/, "The model did not answer (token limit reached)"], [/Model trả lời rỗng/, "The model returned an empty answer"],
+  [/Câu trả lời bị cắt giữa chừng vì hết giới hạn token/, "The answer was cut off at the token limit"], [/JSON không đúng dạng/, "Malformed JSON"],
+  [/Không mở được file này/, "This file cannot be opened"], [/LM Studio trả lỗi/, "LM Studio returned error"], [/LM Studio báo lỗi:/, "LM Studio reported an error:"],
+];
+// tr: dịch chữ của server. trx: chỉ dịch khi khớp nguyên cụm (dùng cho ô bảng, tránh sửa nhầm dữ liệu hóa đơn).
+const tr = s => {
+  if (lang === "vi" || typeof s !== "string") return s;
+  if (D[s] != null) return D[s];
+  return R.reduce((o, [re, to]) => o.replace(re, to), s);
+};
+const trx = s => lang === "vi" || typeof s !== "string" ? s : (D[s] ?? s.replace(/^Song song ×(\d+)$/, "Parallel ×$1"));
+
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const api = async (path, opts) => {
+  const r = await fetch(path, opts);
+  if (!r.ok) throw new Error(tr((await r.json().catch(() => ({}))).detail || r.statusText));
+  return r.json();
+};
+const fmt = v => v == null ? "–" : typeof v === "number" ? v.toLocaleString(lang === "vi" ? "vi-VN" : "en-US") : v;
+
+let mods = [], models = [], lmUp = false, jobId = null, selected = null, imagesVer = 0;
+let lastLog = [], lmStarting = false, connLost = false, lastGpu = null, lastEng = null, lastRam = null;
+const gb = mb => fmt(Math.round((mb || 0) / 102.4) / 10);
+// Nhãn ngắn: model chạy bằng GPU / GPU tràn VRAM / CPU, kèm vài con số.
+function engLabel(e) {
+  if (!e || e.mode === "unknown") return "";
+  if (e.mode === "idle") return t("engIdle");
+  const parts = [e.mode === "gpu" ? t("engGpu", e) : e.mode === "spill" ? t("engSpill") : t("engCpu")];
+  if (e.mode !== "cpu" && e.vram_mb != null) parts.push(`VRAM ${gb(e.vram_mb)} GB`);
+  if (e.mode === "spill") parts.push(t("engShared", gb(e.shared_mb)));
+  if (e.mode === "gpu" && e.gpu_layers > 0) parts.push(e.gpu_layers >= 1000 ? t("engAll") : t("engLayers", e.gpu_layers));
+  if (e.ctx) parts.push(t("engCtx", fmt(e.ctx)));
+  return parts.join(" · ");
+}
+
+// Thẻ ảnh: ảnh gửi cho AI + câu trả lời của AI so với đáp án.
+function shotCard(im) {
+  const checks = (im.checks || []).map(c =>
+    c.ok == null ? `<div class="chk muted">… ${esc(tr(c.label))}: ${t("expected")} ${esc(c.expected)}</div>`
+    : c.ok ? `<div class="chk ok">✓ ${esc(tr(c.label))}: ${esc(tr(c.got))}</div>`
+    : `<div class="chk bad">✗ ${esc(tr(c.label))}: ${t("aiSaid")} ${esc(tr(c.got))} · ${t("expected")} ${esc(c.expected)}</div>`).join("");
+  const fields = (im.fields || []).map(f => `<div><span class="muted">${esc(tr(f.label))}:</span> ${esc(fmt(f.label === "Lỗi" ? tr(f.value) : f.value))}</div>`).join("");
+  const meta = im.status === "pending" ? t("pendingImg") : tr(im.meta || "");
+  return `<div class="shot ${esc(im.status || "done")}"><img src="${esc(im.src)}" alt="${esc(tr(im.title))}" loading="lazy">
+    <div class="cap"><b>${esc(tr(im.title))}</b>${checks}${fields}<div class="muted" style="margin-top:4px">${esc(meta)}</div></div></div>`;
+}
+const galleryHtml = (images, title) => images.length
+  ? `<h3>${esc(title)}</h3><div class="gallery">${images.map(shotCard).join("")}</div>` : "";
+
+async function showLive(job) {
+  if (job.images_ver === imagesVer) return;
+  imagesVer = job.images_ver;
+  const images = await api(`/api/jobs/${job.id}/images`);
+  $("live").innerHTML = galleryHtml(images.slice().reverse(), t("liveTitle"));
+}
+// Khung "đang chạy" ở đầu cột phải: luôn hiện trong lúc test, kể cả khi người dùng mở xem kết quả cũ bên dưới.
+function paintLive(job) {
+  const mod = mods.find(m => m.id === job.module);
+  $("liveTitle").innerHTML = `${t("liveRun")}: ${esc(mod ? tr(mod.name) : "")}${job.model ? " · " + modelHtml(job.model) : ""}`;
+  $("livePct").textContent = Math.round(job.progress * 100) + "%";
+  $("liveBar").style.width = (job.progress * 100) + "%";
+  const last = lastLog[lastLog.length - 1];
+  $("liveLast").textContent = last ? tr(last) : t("liveHint");
+  $("liveCard").hidden = false;
+}
+
+async function refreshStatus() {
+  try {
+    const s = await api("/api/status");
+    const had = models.length;
+    lmUp = s.lmstudio.up; models = s.models;
+    if (!had && models.length) loadHistory().catch(() => {});  // để lịch sử cũ tra được tham số nén
+    $("lmDot").className = "dot " + (lmUp ? "ok" : "bad");
+    $("lmStart").hidden = lmUp;
+    lastGpu = s.gpu; lastEng = s.engine; lastRam = s.ram_total_mb || null; connLost = false;
+    paintStatus();
+    fillModels();
+    if (s.running_job && !jobId) { jobId = s.running_job; poll(); }
+  } catch (e) { connLost = true; paintStatus(); $("lmDot").className = "dot bad"; }
+  $("run").disabled = !lmUp || !!jobId;
+  $("module").disabled = !!jobId;  // đang chạy thì không cho đổi bài test
+  syncQuick();
+}
+// Dòng trạng thái trên thanh đầu (tách riêng để đổi ngôn ngữ là vẽ lại được ngay).
+function paintStatus() {
+  $("lmText").textContent = connLost ? t("lost") : lmStarting ? t("lmStarting") : lmUp ? t("lmUp", models.length) : t("lmDown");
+  const e = lmUp ? lastEng : null, label = engLabel(e), w = $("engWarn");
+  $("engText").hidden = !label; $("engText").className = "eng " + (e ? e.mode : "unknown"); $("engText").textContent = label;
+  w.hidden = !(e && (e.mode === "spill" || e.mode === "cpu")); w.classList.toggle("cpu", !!e && e.mode === "cpu");
+  if (!w.hidden) w.innerHTML = e.mode === "spill"
+    ? `<b class="t">${t("spillTitle")}</b>${esc(t("spillBody", e, gb((e.vram_mb || 0) + (e.shared_mb || 0)), gb(lastGpu && lastGpu.vram_total_mb)))}<ul>${t("spillFix").map(x => `<li>${x}</li>`).join("")}</ul>`
+    : `<b class="t">${t("cpuTitle")}</b>${esc(t("cpuBody", e))}`;
+  const g = lastGpu;
+  if (!g) return;
+  $("gpuText").textContent = g.name
+    ? `${g.name} · ${fmt(g.vram_used_mb)} / ${fmt(g.vram_total_mb)} MB VRAM` +
+      (g.power_w != null ? ` · ${t("gpuPower", fmt(Math.round(g.power_w)))}` : "") + ` · driver ${g.driver}`
+    : t("gpuNone");
+}
+// Các nút chạy nhanh bật/tắt theo nút Chạy.
+const syncQuick = () => document.querySelectorAll(".quick button").forEach(b => { b.disabled = $("run").disabled; });
+
+// Tham số nén (quantization, vd. MXFP4, Q4_K_M): lấy từ kết quả đã lưu; kết quả cũ chưa lưu thì tra theo model đang có trong LM Studio.
+const quantOf = (id, q) => q || (models.find(m => m.id === id) || {}).quantization || "";
+const modelHtml = (id, q) => esc(id || "") + (quantOf(id, q) ? ` <span class="q">${esc(quantOf(id, q))}</span>` : "");
+
+// ----- Model có hợp phần cứng không: ước lượng trước khi chạy -----
+// Bộ nhớ cần = file model (+5% và 300 MB phụ trội) + bộ nhớ ngữ cảnh (~2,3 MB cho mỗi 1.024 token trên mỗi GB model,
+// rút ra từ các lần đo thật trên máy này). Chỉ là ước lượng; khi model đang nạp thì ưu tiên số đo thật.
+const FIT_CTX = 8192, FIT_RESERVE = 1024;
+function fitOf(id) {
+  const m = models.find(x => x.id === id), vram = lastGpu && lastGpu.vram_total_mb;
+  if (!m || !m.size_bytes || !vram) return null;
+  const sizeGb = m.size_bytes / 2 ** 30, perK = sizeGb * 2.3;
+  const w = m.size_bytes / 2 ** 20 * 1.05 + 300;
+  const loaded = m.state === "loaded", ctx = (loaded && m.loaded_context_length) || FIT_CTX;
+  const need = w + perK * ctx / 1024, base = w + perK * FIT_CTX / 1024;
+  let max = Math.floor((vram - FIT_RESERVE - w) / perK / 4) * 4096;  // ngữ cảnh lớn nhất còn vừa VRAM, làm tròn xuống 4.096
+  if (m.max_context_length) max = Math.min(max, m.max_context_length);
+  const f = {size: gb(m.size_bytes / 2 ** 20), est: true, tip: ""};
+  const eng = loaded && models.filter(x => x.state === "loaded").length === 1 ? lastEng : null;
+  if (eng && eng.mode === "cpu") Object.assign(f, {level: "bad", title: t("fitWarnT"), text: t("fitCpu"), est: false});
+  else if (eng && eng.mode === "spill") Object.assign(f, {level: "warn", title: t("fitWarnT"), text: t("fitSpill", gb(eng.shared_mb)), est: false});
+  else if (lastRam && w > vram + lastRam * 0.8) Object.assign(f, {level: "bad", title: t("fitBadT"), text: t("fitNo", gb(base), gb(vram), gb(lastRam))});
+  else if (base > vram) Object.assign(f, {level: "warn", title: t("fitWarnT"), text: t("fitOver", gb(base), gb(vram))});
+  else if (loaded && need > vram - FIT_RESERVE && max >= 4096) Object.assign(f, {level: "warn", title: t("fitWarnT"), text: t("fitCtx", gb(need), gb(vram), fmt(ctx), fmt(max))});
+  else {
+    const tight = need > vram - FIT_RESERVE;
+    Object.assign(f, {level: tight ? "tight" : "ok", title: t(tight ? "fitTightT" : "fitOkT"), text: t(tight ? "fitTight" : "fitOk", gb(need), gb(vram))});
+    if (!loaded && max >= 4096 && max < (m.max_context_length || Infinity)) f.tip = t("fitCtxTip", fmt(max));
+  }
+  f.risky = f.level === "warn" || f.level === "bad";
+  return f;
+}
+function paintFit() {
+  document.querySelectorAll("select[data-type=model]").forEach(sel => {
+    const box = sel.nextElementSibling;
+    if (!box || !box.classList.contains("fit")) return;
+    const f = fitOf(sel.value);
+    box.hidden = !f;
+    if (!f) return;
+    box.className = "fit " + f.level;
+    box.innerHTML = `<b>${esc(f.title)}</b>${esc(f.text)}${f.tip ? " " + esc(f.tip) : ""}` + (f.est ? `<div class="muted">${esc(t("fitEst", f.size))}</div>` : "");
+  });
+}
+
+function fillModels() {
+  document.querySelectorAll("select[data-type=model]").forEach(sel => {    const cur = sel.value;
+    const only = sel.dataset.filter ? sel.dataset.filter.split(",") : null;  // vd. "vlm" = chỉ model thị giác
+    const list = models.filter(m => only ? only.includes(m.type) : m.type !== "embeddings");
+    sel.innerHTML = list.length
+      ? list.map(m => `<option value="${esc(m.id)}">${esc(m.id)}${m.quantization ? ` (${esc(m.quantization)})` : ""}${m.state === "loaded" ? t("loaded") : ""}${m.type === "vlm" ? t("vision") : ""}</option>`).join("")
+      : `<option value="">${esc(t("noModel"))}</option>`;
+    const loaded = list.find(m => m.state === "loaded");
+    sel.value = list.some(m => m.id === cur) ? cur : (loaded || list[0] || {id: ""}).id;
+  });
+  paintFit();
+}
+
+function renderForm() {
+  const m = mods.find(x => x.id === $("module").value);
+  if (!m) return;
+  $("moduleDesc").textContent = tr(m.description);
+  $("form").innerHTML = m.params.map(p => {
+    const help = p.help ? `<div class="help">${esc(tr(p.help))}</div>` : "";
+    const a = `name="${esc(p.key)}" data-type="${esc(p.type)}"`;
+    if (p.type === "bool")
+      return `<label class="check"><input type="checkbox" ${a} ${p.default ? "checked" : ""}>${esc(tr(p.label))}</label>${help}`;
+    let input;
+    if (p.type === "model") input = `<select ${a} data-filter="${esc((p.options || []).join(","))}"></select><div class="fit" hidden></div>`;
+    else if (p.type === "select") input = `<select ${a}>${(p.options || []).map(o => `<option ${o === p.default ? "selected" : ""}>${esc(o)}</option>`).join("")}</select>`;
+    else if (p.type === "int") input = `<input type="number" ${a} value="${esc(p.default)}" ${p.min != null ? `min="${p.min}"` : ""} ${p.max != null ? `max="${p.max}"` : ""}>` +
+      ((p.presets || []).length ? `<div class="quick">${p.presets.map(n =>
+        `<button type="button" data-quick="${esc(p.key)}" data-value="${n}">${esc(t("runN", n, tr(p.unit || "")))}</button>`).join("")}</div>` : "");
+    else if (p.type === "textarea") input = `<textarea rows="5" ${a}>${esc(p.default)}</textarea>`;
+    else input = `<input type="text" ${a} value="${esc(p.default)}">`;
+    return `<label>${esc(tr(p.label))}</label>${input}${help}`;
+  }).join("");
+  fillModels();
+  syncQuick();
+}
+
+function formParams() {
+  const out = {};
+  $("form").querySelectorAll("[name]").forEach(el => { out[el.name] = el.type === "checkbox" ? el.checked : el.value; });
+  return out;
+}
+
+async function run() {
+  // Cảnh báo trước khi chạy nếu model được chọn không hợp phần cứng.
+  const risky = [...$("form").querySelectorAll("select[data-type=model]")].map(s => fitOf(s.value)).find(f => f && f.risky);
+  if (risky && !confirm(t("fitConfirm", `${risky.title}\n${risky.text}`))) return;
+  try {
+    const job = await api("/api/jobs", {method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({module: $("module").value, params: formParams()})});
+    jobId = job.id; poll();
+  } catch (e) { alert(e.message); }
+}
+
+async function poll() {
+  $("jobCard").hidden = false; $("cancel").hidden = false; $("run").disabled = true; $("module").disabled = true; syncQuick();
+  let job;
+  try { job = await api("/api/jobs/" + jobId); } catch (e) { jobId = null; $("liveCard").hidden = true; refreshStatus(); return; }
+  $("jobBar").style.width = (job.progress * 100) + "%";
+  $("jobPct").textContent = job.status === "running" ? Math.round(job.progress * 100) + "%" : "";
+  lastLog = job.log; const log = $("jobLog"); log.textContent = lastLog.map(tr).join("\n"); log.scrollTop = log.scrollHeight;
+  if (job.status === "running") paintLive(job);
+  if (job.images_ver) await showLive(job).catch(() => {});
+  if (job.status === "running") { setTimeout(poll, 700); return; }
+  jobId = null; imagesVer = 0; $("cancel").hidden = true; $("liveCard").hidden = true; $("live").innerHTML = "";
+  await refreshStatus(); await loadHistory();
+  if (job.result_id) showResult(job.result_id);
+}
+
+function chartSvg(c) {
+  const W = 1000, H = 180, P = 8, n = c.x.length;
+  if (n < 2) return "";
+  const x0 = c.x[0], x1 = c.x[n - 1] || 1;
+  let lines = "", legend = "";
+  c.series.forEach((s, i) => {
+    const vals = s.data.filter(v => v != null);
+    if (!vals.length) return;
+    const max = Math.max(...vals, 1e-9);
+    const pts = s.data.map((v, k) => v == null ? null :
+      `${(P + (c.x[k] - x0) / (x1 - x0) * (W - 2 * P)).toFixed(1)},${(H - P - v / max * (H - 2 * P)).toFixed(1)}`).filter(Boolean);
+    lines += `<polyline fill="none" stroke="var(--c${i % 4})" stroke-width="2" vector-effect="non-scaling-stroke" points="${pts.join(" ")}"/>`;
+    legend += `<span><i style="background:var(--c${i % 4})"></i>${esc(tr(s.name))} · ${t("peak")} ${fmt(max)} ${esc(s.unit || "")}</span>`;
+  });
+  return `<h3>${esc(tr(c.title))}</h3><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${lines}</svg>
+    <div class="legend">${legend}<span>${t("chartNote", fmt(Math.round(x1 - x0)))}</span></div>`;
+}
+
+async function showResult(id) {
+  let r;
+  try { r = await api("/api/results/" + id); } catch (e) { return; }
+  selected = id;
+  document.querySelectorAll("#history tr").forEach(tr => tr.classList.toggle("sel", tr.dataset.id === id));
+  const res = r.result || {};
+  $("resultTitle").innerHTML = `${esc(tr(r.module_name))} · ${modelHtml(r.params.model, (r.model_info || {}).quantization)}`;
+  let h = `<div class="muted" style="margin-bottom:12px">${esc(r.started_at.replace("T", " "))} · ${esc(r.gpu.name || "GPU ?")} · ${t("ranFor", fmt(r.duration_s))}` +
+    (engLabel(r.engine) && r.engine.mode !== "idle" ? `<br>${t("engRan")}: <span class="eng ${esc(r.engine.mode)}">${esc(engLabel(r.engine))}</span>` : "") + `</div>`;
+  h += `<div class="tiles">` + (res.summary || []).map(s =>
+    `<div class="tile"><div class="l">${esc(tr(s.label))}</div><div class="v">${esc(fmt(s.value))}<span class="u">${esc(tr(s.unit || ""))}</span></div></div>`).join("") + `</div>`;
+  (res.files || []).forEach(f => {
+    h += `<div class="filebox"><b>${esc(tr(f.label))}:</b> <span>${esc(f.path)}</span>
+      <button data-open="${esc(f.path)}">${t("openFile")}</button></div>`;
+  });
+  h += galleryHtml(res.images || [], t("galleryTitle"));
+  if (res.text) h += `<h3>${t("answer")}</h3><pre style="max-height:400px">${esc(res.text)}</pre>`;
+  (res.tables || []).forEach(tb => {
+    h += `<h3>${esc(tr(tb.title))}</h3><div class="scroll"><table><tr>${tb.columns.map(c => `<th>${esc(tr(c))}</th>`).join("")}</tr>` +
+      tb.rows.map(row => `<tr>${row.map(c => `<td>${esc(fmt(trx(c)))}</td>`).join("")}</tr>`).join("") + `</table></div>`;
+  });
+  (res.charts || []).forEach(c => { h += chartSvg(c); });
+  $("result").className = ""; $("result").innerHTML = h;
+}
+
+async function loadHistory() {
+  const list = await api("/api/results");
+  if (!list.length) { $("history").innerHTML = `<span class="muted">${t("histEmpty")}</span>`; return; }
+  $("history").innerHTML = `<table><tr><th></th>${t("cols").map(c => `<th>${c}</th>`).join("")}</tr>` +
+    list.map(r => `<tr class="click ${r.id === selected ? "sel" : ""}" data-id="${esc(r.id)}">
+      <td><label class="pick"><input type="checkbox" data-cmp="${esc(r.id)}"><span class="ord"></span></label></td>
+      <td>${esc((r.started_at || "").replace("T", " "))}</td><td>${esc(tr(r.module_name))}</td><td>${modelHtml(r.model, r.quant)}</td><td>${esc(r.gpu || "")}</td>
+      <td>${r.summary.slice(0, 4).map(s => `${esc(tr(s.label))}: <b>${esc(fmt(s.value))}</b> ${esc(tr(s.unit || ""))}`).join(" · ")}</td></tr>`).join("") + `</table>`;
+  document.querySelectorAll("#history tr.click").forEach(tr => tr.onclick = e => { if (!e.target.closest(".pick")) showResult(tr.dataset.id); });
+  syncCmp();
+}
+
+document.addEventListener("click", e => {
+  const z = $("zoom");
+  if (e.target.dataset.quick) {  // nút chạy nhanh: điền số vào ô rồi chạy luôn
+    if ($("run").disabled) return;
+    $("form").querySelector(`[name="${e.target.dataset.quick}"]`).value = e.target.dataset.value;
+    run();
+    return;
+  }
+  if (e.target.dataset.open) {
+    api("/api/open", {method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({path: e.target.dataset.open})}).catch(err => alert(err.message));
+    return;
+  }
+  if (e.target.closest(".shot img, #logo")) { z.querySelector("img").src = e.target.dataset.full || e.target.src; z.classList.add("on"); }
+  else if (z.classList.contains("on")) z.classList.remove("on");
+});
+$("run").onclick = run;
+$("cancel").onclick = () => jobId && api(`/api/jobs/${jobId}/cancel`, {method: "POST"});
+$("module").onchange = renderForm;
+$("form").addEventListener("change", e => { if (e.target.matches("select[data-type=model]")) paintFit(); });
+$("lmStart").onclick = async () => {
+  $("lmStart").disabled = true; lmStarting = true; paintStatus();
+  try { await api("/api/lmstudio/start", {method: "POST"}); } catch (e) { alert(e.message); }
+  $("lmStart").disabled = false; lmStarting = false; refreshStatus();
+};
+
+// ----- So sánh các lần chạy -----
+// cmp giữ id theo thứ tự tick: phần tử đầu là mốc 100%.
+const CMP_MAX = 5;
+let cmp = [], cmpOpen = false;
+let price = (v => v == null || isNaN(+v) ? 3000 : +v)(store.get("price"));  // đ / kWh
+const cmpData = {};
+// Chiều "tốt": 1 = càng cao càng mạnh, -1 = càng thấp càng tốt (điện, độ trễ, nhiệt...), 0 = chỉ để tham khảo.
+const LOWER = new Set(["Độ trễ token đầu", "Thời gian nạp model", "Thời gian mỗi hóa đơn", "Nhiệt độ cao nhất"]);
+const NEUTRAL = /^(VRAM đỉnh|GPU sử dụng|Hóa đơn đã đọc|Số dòng hàng hóa|Tổng thành tiền)/;
+const HW = /^(VRAM đỉnh|GPU sử dụng|Nhiệt độ)/;
+const cmpGroup = s => ["Wh", "W", "tok/s/W"].includes(s.unit) ? "energy" : HW.test(s.label) ? "hw" : "perf";
+const cmpDir = s => NEUTRAL.test(s.label) ? 0 : (s.unit === "Wh" || s.unit === "W" || LOWER.has(s.label)) ? -1 : 1;
+const money = v => "≈ " + v.toLocaleString(lang === "vi" ? "vi-VN" : "en-US", {maximumFractionDigits: v < 100 ? 2 : 0}) + " " + t("moneyUnit");
+
+function syncCmp() {
+  document.querySelectorAll("#history input[data-cmp]").forEach(cb => {
+    const i = cmp.indexOf(cb.dataset.cmp);
+    cb.checked = i >= 0; cb.disabled = i < 0 && cmp.length >= CMP_MAX;
+    cb.title = cb.disabled ? t("cmpFull") : t("cmpTick");
+    cb.nextElementSibling.textContent = i >= 0 ? i + 1 : "";
+  });
+  $("cmpGo").textContent = t("cmpBtn", cmp.length); $("cmpGo").disabled = cmp.length < 2;
+  $("cmpClear").hidden = !cmp.length;
+}
+$("history").addEventListener("change", e => {
+  const id = e.target.dataset.cmp;
+  if (!id) return;
+  if (!e.target.checked) cmp = cmp.filter(x => x !== id);
+  else if (cmp.length < CMP_MAX) cmp.push(id);
+  syncCmp();
+});
+$("cmpClear").onclick = () => { cmp = []; syncCmp(); };
+$("cmpGo").onclick = openCompare;
+
+async function openCompare() {
+  $("cmpGo").disabled = true;
+  for (const id of cmp) if (!cmpData[id]) { try { cmpData[id] = await api("/api/results/" + id); } catch (e) {} }
+  cmp = cmp.filter(id => cmpData[id]);
+  syncCmp();
+  if (cmp.length < 2) return;
+  cmpOpen = true; document.querySelector("main").hidden = true; $("compare").hidden = false;
+  renderCompare(); scrollTo(0, 0);
+}
+function closeCompare() {
+  cmpOpen = false; $("compare").hidden = true; document.querySelector("main").hidden = false; syncCmp();
+}
+
+// 1 ô: giá trị, thanh, % so với mốc (cột đầu), và tiền điện nếu là số đo điện.
+function cmpCell(row, i) {
+  const s = row.cells[i], base = i === 0 ? " class=\"base\"" : "";
+  if (!s || s.value == null) return `<td${base}><span class="muted">–</span></td>`;
+  const v = s.value;
+  let h = `<div class="cv">${esc(fmt(v))}<span class="u">${esc(tr(s.unit || ""))}</span></div>`;
+  if (typeof v !== "number") return `<td${base}>${h}</td>`;
+  const b = row.cells[0] && row.cells[0].value;
+  const max = Math.max(...row.cells.map(c => c && typeof c.value === "number" ? Math.abs(c.value) : 0), 1e-9);
+  let cls = "base", note = t("cmpBase"), pct = 100;
+  if (i > 0) {
+    if (typeof b === "number" && b > 0) {
+      pct = v / b * 100;
+      const n = Math.round(Math.abs(pct - 100)), d = fmt(n), up = pct > 100, arrow = up ? "▲ " : "▼ ";
+      if (n < 1) { cls = "same"; note = t("cmpSame"); }
+      else if (row.dir > 0) { cls = up ? "good" : "bad"; note = arrow + t(up ? "stronger" : "weaker", d); }
+      else if (row.dir < 0) { cls = up ? "bad" : "good"; note = arrow + t(up ? "higherBad" : "lowerGood", d); }
+      else { cls = "same"; note = arrow + t(up ? "higherN" : "lowerN", d); }
+    } else pct = null;  // mốc không có tiêu chí này → không tính được %
+  }
+  h += `<div class="cbar ${pct == null ? "same" : cls}"><div style="width:${(Math.abs(v) / max * 100).toFixed(1)}%"></div></div>`;
+  if (pct != null) h += `<div class="cp ${cls}"><b>${fmt(Math.round(pct))}%</b><span>${note}</span></div>`;
+  if (s.unit === "Wh") h += `<div class="cost" title="${t("costTip")}">${money(v / 1000 * price)}</div>`;
+  if (s.unit === "W") h += `<div class="cost" title="${t("costTip")}">${money(v / 1000 * price)}${t("perHour")}</div>`;
+  return `<td${base}>${h}</td>`;
+}
+
+function renderCompare() {
+  const runs = cmp.map(id => cmpData[id]).filter(Boolean);
+  const rows = [];  // mỗi tiêu chí 1 dòng, ghép theo tên tiêu chí
+  runs.forEach((r, i) => ((r.result || {}).summary || []).forEach(s => {
+    let row = rows.find(x => x.label === s.label);
+    if (!row) rows.push(row = {label: s.label, group: cmpGroup(s), dir: cmpDir(s), cells: runs.map(() => null)});
+    row.cells[i] = s;
+  }));
+  const head = runs.map((r, i) => {
+    const eng = engLabel(r.engine) && r.engine.mode !== "idle" ? `<div><span class="eng ${esc(r.engine.mode)}" style="white-space:normal">${esc(engLabel(r.engine))}</span></div>` : "";
+    return `<th${i ? "" : ' class="base"'}><div class="hd">${i ? `<button data-base="${i}">${t("cmpSetBase")}</button>` : `<span class="tag">${t("cmpBase")}</span>`}
+      <button class="x" data-drop="${i}" title="${t("cmpRemove")}">✕</button></div>
+      <div class="m">${modelHtml(r.params.model, (r.model_info || {}).quantization)}</div><div class="muted">${esc(tr(r.module_name))}</div>
+      <div class="muted">${esc((r.gpu || {}).name || "GPU ?")}</div><div class="muted">${esc((r.started_at || "").replace("T", " "))}</div>${eng}</th>`;
+  }).join("");
+  const priceBox = `<label>${t("priceLabel")} <input type="number" id="price" min="0" step="100" value="${price}"> ${t("priceUnit")}</label>`;
+  const body = [["perf", "🚀 " + t("grpPerf"), ""], ["energy", "⚡ " + t("grpEnergy"), priceBox], ["hw", "🖥 " + t("grpHw"), ""]].map(([g, name, extra]) => {
+    const list = rows.filter(r => r.group === g);
+    return list.length ? `<tr class="grp"><td colspan="${runs.length + 1}">${name}${extra}</td></tr>` +
+      list.map(row => `<tr><td>${esc(tr(row.label))}</td>${runs.map((_, i) => cmpCell(row, i)).join("")}</tr>`).join("") : "";
+  }).join("");
+  const mixed = new Set(runs.map(r => r.module)).size > 1 ? `<div class="filebox">${t("cmpMixed")}</div>` : "";
+  $("compare").innerHTML = `<div class="card"><div class="cmphead"><button id="cmpBack">${t("cmpBack")}</button><h2>${t("cmpTitle")}</h2>
+    <span class="muted">${t("cmpNote")}</span></div>${mixed}
+    <div class="scroll" style="margin-top:12px"><table class="cmp"><tr><th>${t("cmpCrit")}</th>${head}</tr>${body}</table></div></div>`;
+}
+$("compare").addEventListener("click", e => {
+  const d = e.target.dataset;
+  if (e.target.id === "cmpBack") return closeCompare();
+  if (d.base) { const [id] = cmp.splice(+d.base, 1); cmp.unshift(id); renderCompare(); }
+  if (d.drop) { cmp.splice(+d.drop, 1); if (cmp.length < 2) closeCompare(); else renderCompare(); }
+});
+$("compare").addEventListener("change", e => {
+  if (e.target.id !== "price") return;
+  price = Math.max(0, +e.target.value || 0); store.set("price", price); renderCompare();
+});
+
+// ----- Ngôn ngữ -----
+function fillModules() {
+  const cur = $("module").value;
+  $("module").innerHTML = mods.map(m => `<option value="${esc(m.id)}">${esc(tr(m.name))}</option>`).join("");
+  if (cur) $("module").value = cur;
+}
+function applyLang() {
+  document.documentElement.lang = lang;
+  document.querySelectorAll("[data-i18n]").forEach(el => { el.textContent = t(el.dataset.i18n); });
+  $("langVi").classList.toggle("on", lang === "vi"); $("langEn").classList.toggle("on", lang === "en");
+  $("logo").title = t("logoTip");
+  paintTools(); paintStatus();
+  if (mods.length) {
+    const keep = formParams();  // giữ lại những gì người dùng đã nhập
+    fillModules(); renderForm();
+    $("form").querySelectorAll("[name]").forEach(el => {
+      if (!(el.name in keep)) return;
+      if (el.type === "checkbox") el.checked = keep[el.name]; else if (keep[el.name]) el.value = keep[el.name];
+    });
+    paintFit();
+  }
+  $("jobLog").textContent = lastLog.map(tr).join("\n");
+  if (jobId) imagesVer = 0;  // lần hỏi tiến trình kế tiếp sẽ vẽ lại ảnh đang chạy theo ngôn ngữ mới
+  if (selected) showResult(selected);
+  else { $("resultTitle").textContent = t("result"); $("result").className = "muted"; $("result").textContent = t("noResult"); }
+  if (mods.length) loadHistory().catch(() => {});
+  syncCmp();
+  if (cmpOpen) renderCompare();
+}
+function setLang(l) { lang = l; store.set("lang", l); applyLang(); }
+$("langVi").onclick = () => setLang("vi");
+$("langEn").onclick = () => setLang("en");
+
+// ----- Giao diện sáng/tối + nền động -----
+const root = document.documentElement;
+function paintTools() {
+  const dark = root.dataset.theme === "dark";
+  $("themeBtn").textContent = dark ? "☀️" : "🌙";
+  $("themeBtn").title = t(dark ? "toLight" : "toDark");
+  $("fxBtn").title = t(fx.on ? "fxOn" : "fxOff");
+  $("fxBtn").classList.toggle("off", !fx.on);
+}
+$("themeBtn").onclick = () => {
+  root.dataset.theme = root.dataset.theme === "dark" ? "light" : "dark";
+  store.set("theme", root.dataset.theme);
+  fx.recolor(); paintTools();
+};
+
+// Mạng hạt nối nhau + "gói dữ liệu" chạy trên đường nối. Vẽ ~30 hình/giây bằng canvas 2D để nhẹ máy.
+const fx = (() => {
+  const cv = $("fx"), cx = cv.getContext("2d");
+  const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const LINK = 150;
+  let W = 0, H = 0, nodes = [], packets = [], raf = 0, last = 0, c1 = "", c2 = "";
+  const self = { on: store.get("fx") !== "0", recolor, toggle };
+  function recolor() {
+    const cs = getComputedStyle(root);
+    c1 = cs.getPropertyValue("--fx").trim(); c2 = cs.getPropertyValue("--fx2").trim();
+    if (self.on && !raf) draw(false);
+  }
+  function resize() {
+    const d = Math.min(devicePixelRatio || 1, 1.5);
+    W = innerWidth; H = innerHeight; cv.width = W * d; cv.height = H * d; cx.setTransform(d, 0, 0, d, 0, 0);
+    const n = Math.min(90, Math.round(W * H / 20000));
+    nodes = Array.from({length: n}, () => ({x: Math.random() * W, y: Math.random() * H,
+      vx: (Math.random() - .5) * .6, vy: (Math.random() - .5) * .6, r: 1 + Math.random() * 1.8}));
+    packets = [];
+    if (self.on && !raf) draw(false);
+  }
+  function draw(move) {
+    cx.clearRect(0, 0, W, H);
+    if (move) for (const p of nodes) {
+      p.x += p.vx; p.y += p.vy;
+      if (p.x < 0 || p.x > W) p.vx *= -1;
+      if (p.y < 0 || p.y > H) p.vy *= -1;
+    }
+    cx.lineWidth = 1;
+    for (let i = 0; i < nodes.length; i++) for (let j = i + 1; j < nodes.length; j++) {
+      const a = nodes[i], b = nodes[j], dx = a.x - b.x, dy = a.y - b.y, d2 = dx * dx + dy * dy;
+      if (d2 > LINK * LINK) continue;
+      cx.strokeStyle = `rgba(${c1},${(.5 * (1 - Math.sqrt(d2) / LINK)).toFixed(3)})`;
+      cx.beginPath(); cx.moveTo(a.x, a.y); cx.lineTo(b.x, b.y); cx.stroke();
+      if (move && packets.length < 14 && Math.random() < .0015) packets.push({a, b, k: 0});
+    }
+    cx.fillStyle = `rgba(${c1},.75)`;
+    for (const p of nodes) { cx.beginPath(); cx.arc(p.x, p.y, p.r, 0, 6.283); cx.fill(); }
+    packets = packets.filter(p => p.k <= 1);
+    for (const p of packets) {
+      if (move) p.k += .025;
+      const x = p.a.x + (p.b.x - p.a.x) * p.k, y = p.a.y + (p.b.y - p.a.y) * p.k;
+      cx.fillStyle = `rgba(${c2},.22)`; cx.beginPath(); cx.arc(x, y, 7, 0, 6.283); cx.fill();
+      cx.fillStyle = `rgba(${c2},.95)`; cx.beginPath(); cx.arc(x, y, 2.4, 0, 6.283); cx.fill();
+    }
+  }
+  function loop(ts) { raf = requestAnimationFrame(loop); if (ts - last < 33) return; last = ts; draw(true); }
+  function start() {
+    root.classList.toggle("fx-off", !self.on);
+    cancelAnimationFrame(raf); raf = 0;
+    if (!self.on) { cx.clearRect(0, 0, W, H); return; }
+    if (still) draw(false); else raf = requestAnimationFrame(loop);
+  }
+  function toggle() { self.on = !self.on; store.set("fx", self.on ? "1" : "0"); start(); }
+  addEventListener("resize", resize);
+  recolor(); resize(); start();
+  return self;
+})();
+$("fxBtn").onclick = () => { fx.toggle(); paintTools(); };
+
+applyLang();
+(async () => {
+  mods = await api("/api/modules");
+  fillModules();
+  renderForm();
+  await refreshStatus();
+  await loadHistory();
+  setInterval(refreshStatus, 3000);  // chạy cả khi đang test để công suất GPU trên thanh đầu luôn cập nhật
+})();
+</script>
+</body>
+</html>
