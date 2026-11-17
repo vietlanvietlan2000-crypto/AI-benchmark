@@ -210,6 +210,9 @@
     <div class="card warnbox" id="engWarn" hidden></div>
     <div class="card">
       <h2 data-i18n="pickTest"></h2>
+      <label for="mdir" style="margin-top:0" data-i18n="mdirLabel"></label>
+      <select id="mdir"></select>
+      <div class="help" id="mdirHelp" style="margin:6px 0 12px"></div>
       <select id="module"></select>
       <div class="help" id="moduleDesc" style="margin-top:6px"></div>
       <form id="form"></form>
@@ -282,6 +285,14 @@ const T = {
     fitCpu: "Đo thực tế: model này đang nạp và chạy bằng CPU, không dùng GPU.",
     fitCtxTip: max => `Để Context Length trong LM Studio không quá khoảng ${max} token, nếu cao hơn sẽ tràn VRAM.`,
     fitEst: size => `Ước lượng từ dung lượng file model (${size} GB), sai số có thể vài GB.`,
+    mdirLabel: "Thư mục model của LM Studio", mdirOther: "Thư mục khác…", mdirDefault: "mặc định",
+    mdirOpt: (n, free) => `${n} model · ổ còn trống ${free} GB`,
+    mdirHelp: "LM Studio chỉ đọc model trong một thư mục. Đổi thư mục ở đây để chọn model nằm ở nơi khác.",
+    mdirBusy: "Đang đổi thư mục model…", mdirRestarting: "Đang khởi động lại LM Studio (khoảng 30 giây)…",
+    mdirAsk: "Nhập đường dẫn thư mục chứa model (ví dụ D:\\LM Studio Models):",
+    mdirConfirm: p => `Đổi thư mục model của LM Studio sang:\n${p}\n\nModel đang nạp có thể bị gỡ khỏi bộ nhớ. Tiếp tục?`,
+    mdirRestart: "LM Studio chưa nhận thư mục mới.\n\nKhởi động lại LM Studio ngay bây giờ? (model đang nạp sẽ bị gỡ, cuộc chat đang chạy trong LM Studio sẽ dừng)",
+    mdirLater: "Đã lưu. Thư mục mới có hiệu lực sau khi bạn thoát hẳn và mở lại LM Studio.",
     fitConfirm: msg => `Model này có thể không phù hợp với phần cứng:\n\n${msg}\n\nBạn vẫn muốn chạy test?`,
     spillTitle: "Model không nằm vừa trong VRAM – đang chạy chậm gần như CPU",
     spillBody: (e, need, total) => `${e.model || "Model"} cần khoảng ${need} GB (model + ngữ cảnh ${e.ctx ? fmt(e.ctx) : "?"} token) nhưng GPU chỉ có ${total} GB. ` +
@@ -332,6 +343,14 @@ const T = {
     fitCpu: "Measured: this model is loaded and running on CPU, not the GPU.",
     fitCtxTip: max => `Keep Context Length in LM Studio at or below about ${max} tokens; higher will overflow VRAM.`,
     fitEst: size => `Estimated from the model file size (${size} GB); may be off by a few GB.`,
+    mdirLabel: "LM Studio model folder", mdirOther: "Another folder…", mdirDefault: "default",
+    mdirOpt: (n, free) => `${n} model${n === 1 ? "" : "s"} · ${free} GB free`,
+    mdirHelp: "LM Studio reads models from one folder only. Switch it here to pick models stored elsewhere.",
+    mdirBusy: "Switching the model folder…", mdirRestarting: "Restarting LM Studio (about 30 seconds)…",
+    mdirAsk: "Type the path of the folder that holds your models (e.g. D:\\LM Studio Models):",
+    mdirConfirm: p => `Switch LM Studio's model folder to:\n${p}\n\nLoaded models may be unloaded. Continue?`,
+    mdirRestart: "LM Studio has not picked up the new folder.\n\nRestart LM Studio now? (loaded models are unloaded and any chat running in LM Studio stops)",
+    mdirLater: "Saved. The new folder takes effect after you fully quit and reopen LM Studio.",
     fitConfirm: msg => `This model may not suit your hardware:\n\n${msg}\n\nRun the test anyway?`,
     spillTitle: "The model does not fit in VRAM – it is running almost as slowly as on CPU",
     spillBody: (e, need, total) => `${e.model || "The model"} needs about ${need} GB (model + ${e.ctx ? fmt(e.ctx) : "?"}-token context) but the GPU only has ${total} GB. ` +
@@ -505,6 +524,33 @@ function paintLive(job) {
   $("liveCard").hidden = false;
 }
 
+// ----- Thư mục model của LM Studio -----
+let mdirs = null, mdirBusy = "";
+async function loadDirs() { try { mdirs = await api("/api/model-dirs"); } catch (e) {} paintDirs(); }
+function paintDirs() {
+  const el = $("mdir");
+  el.disabled = !!mdirBusy || !!jobId || !mdirs;
+  $("mdirHelp").textContent = mdirBusy ? t(mdirBusy) : t("mdirHelp");
+  if (!mdirs || document.activeElement === el) return;
+  el.innerHTML = mdirs.dirs.map(d => `<option value="${esc(d.path)}"${d.current ? " selected" : ""}>${esc(d.path)}${d.default ? ` (${t("mdirDefault")})` : ""} — ${t("mdirOpt", d.models, d.free_gb)}</option>`).join("")
+    + `<option value="">${t("mdirOther")}</option>`;
+}
+$("mdir").onchange = async () => {
+  const el = $("mdir"); el.blur();
+  const path = el.value || (prompt(t("mdirAsk")) || "").trim();
+  if (!path || path === mdirs.current || !confirm(t("mdirConfirm", path))) return paintDirs();
+  const post = restart => api("/api/model-dir", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({path, restart})});
+  try {
+    mdirBusy = "mdirBusy"; paintDirs();
+    let r = await post(false);
+    if (!r.applied) {
+      if (confirm(t("mdirRestart"))) { mdirBusy = "mdirRestarting"; paintDirs(); r = await post(true); }
+      else alert(t("mdirLater"));
+    }
+  } catch (e) { alert(tr(e.message)); }
+  mdirBusy = ""; await loadDirs(); refreshStatus();
+};
+
 async function refreshStatus() {
   try {
     const s = await api("/api/status");
@@ -520,6 +566,7 @@ async function refreshStatus() {
   } catch (e) { connLost = true; paintStatus(); $("lmDot").className = "dot bad"; }
   $("run").disabled = !lmUp || !!jobId;
   $("module").disabled = !!jobId;  // đang chạy thì không cho đổi bài test
+  paintDirs();
   syncQuick();
 }
 // Dòng trạng thái trên thanh đầu (tách riêng để đổi ngôn ngữ là vẽ lại được ngay).
@@ -856,7 +903,7 @@ function applyLang() {
   document.querySelectorAll("[data-i18n]").forEach(el => { el.textContent = t(el.dataset.i18n); });
   $("langVi").classList.toggle("on", lang === "vi"); $("langEn").classList.toggle("on", lang === "en");
   $("logo").title = t("logoTip");
-  paintTools(); paintStatus();
+  paintTools(); paintStatus(); paintDirs();
   if (mods.length) {
     const keep = formParams();  // giữ lại những gì người dùng đã nhập
     fillModules(); renderForm();
@@ -960,6 +1007,7 @@ applyLang();
   renderForm();
   await refreshStatus();
   await loadHistory();
+  loadDirs();
   setInterval(refreshStatus, 3000);  // chạy cả khi đang test để công suất GPU trên thanh đầu luôn cập nhật
 })();
 </script>

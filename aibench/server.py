@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import subprocess
 import time
 import traceback
 import uuid
@@ -15,6 +16,7 @@ from fastapi.responses import FileResponse
 from .core import GPU_INDEX, LM_URL, ROOT, list_results, load_result, modules, run_module
 from .engine import engine_status, ram_total_mb
 from .gpu import gpu_info
+from . import setup as st
 from .lmstudio import LMStudio
 
 app = FastAPI(title="AI Bench")
@@ -71,6 +73,79 @@ async def start_lmstudio() -> dict[str, Any]:
     except Exception as e:  # noqa: BLE001
         raise HTTPException(500, str(e)) from e
     return {"ok": True}
+
+
+# ---- thư mục model của LM Studio ---------------------------------------------------------------
+def _count_models(folder: Path) -> int:
+    """Số model trong thư mục (bố cục LM Studio: <nhà phát hành>/<model>/*.gguf; không tính file mmproj)."""
+    try:
+        return sum(1 for f in folder.glob("*/*/*.gguf") if not f.name.lower().startswith("mmproj"))
+    except OSError:
+        return 0
+
+
+def _model_dirs() -> dict[str, Any]:
+    cur = st.models_dir()
+    cands = [st.LMS_HOME / "models", cur, *(Path(root) / "LM Studio Models" for root, _f, _t in st.drives())]
+    seen: dict[str, Path] = {}
+    for p in cands:
+        if p == cur or p.is_dir():
+            seen.setdefault(str(p).lower().rstrip("\\/"), p)
+    key = str(cur).lower().rstrip("\\/")
+    return {"current": str(cur), "dirs": [
+        {"path": str(p), "models": _count_models(p), "free_gb": round(st.free_gb(p)), "current": k == key,
+         "default": p == st.LMS_HOME / "models"} for k, p in seen.items()]}
+
+
+@app.get("/api/model-dirs")
+async def model_dirs() -> dict[str, Any]:
+    return await asyncio.to_thread(_model_dirs)
+
+
+async def _lm_ids() -> set[str] | None:
+    lm = LMStudio(LM_URL)
+    try:
+        return {m["id"] for m in await lm.list_models()} if await lm.is_up() else None
+    except Exception:  # noqa: BLE001
+        return None
+    finally:
+        await lm.close()
+
+
+@app.post("/api/model-dir")
+async def set_model_dir(body: dict[str, Any]) -> dict[str, Any]:
+    """Đổi thư mục model của LM Studio. restart=True: tắt hẳn LM Studio, ghi cài đặt rồi mở lại."""
+    if _running():
+        raise HTTPException(409, "Đang có một bài test chạy, hãy đợi hoặc huỷ nó trước")
+    path = Path(str(body.get("path", "")).strip().strip('"'))
+    if not path.is_absolute():
+        raise HTTPException(400, "Đường dẫn thư mục không hợp lệ")
+    before = await _lm_ids()
+    if body.get("restart"):
+        await asyncio.to_thread(subprocess.run, ["taskkill", "/F", "/T", "/IM", "LM Studio.exe"], capture_output=True)
+        await asyncio.sleep(2)
+    if not await asyncio.to_thread(st.set_models_dir, path):
+        raise HTTPException(500, "Không ghi được cài đặt của LM Studio")
+    if body.get("restart"):
+        exe = st.lmstudio_app()
+        if exe:
+            os.startfile(exe)  # noqa: S606
+        for _ in range(30):  # chờ LM Studio mở xong rồi bật server
+            await asyncio.sleep(2)
+            try:
+                await LMStudio.start_server()
+            except Exception:  # noqa: BLE001
+                continue
+            if await _lm_ids() is not None:
+                return {"ok": True, "applied": True}
+        raise HTTPException(500, "LM Studio chưa mở lại được, hãy mở LM Studio bằng tay")
+    if before is None:  # LM Studio đang tắt: lần mở tới sẽ dùng thư mục mới
+        return {"ok": True, "applied": True}
+    for _ in range(4):  # LM Studio đang chạy: xem nó có tự nhận thư mục mới không
+        await asyncio.sleep(2)
+        if await _lm_ids() != before:
+            return {"ok": True, "applied": True}
+    return {"ok": True, "applied": False}
 
 
 @app.get("/api/modules")
