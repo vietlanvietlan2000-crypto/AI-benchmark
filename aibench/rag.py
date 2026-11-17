@@ -1,19 +1,27 @@
 """Tra cứu tài liệu (RAG) cho chatbot.
 
-Tài liệu đặt trong thư mục Tai_lieu/ (chia thư mục con tùy ý). Cách làm:
-  1. Lập chỉ mục: đọc từng file, cắt thành đoạn (ghi lại đoạn nằm ở trang nào / mục nào / sheet nào),
-     nhờ model embedding của LM Studio đổi mỗi đoạn thành vector.
-  2. Khi hỏi: tìm các đoạn gần câu hỏi nhất để biết tài liệu nào liên quan (bước "định hướng"),
-     rồi đưa cho AI đọc cả tài liệu đó nếu vừa ngữ cảnh, hoặc các đoạn liên quan nếu tài liệu quá dài.
+Tài liệu đặt trong thư mục Tai_lieu/ (chia thư mục con tùy ý). Lập chỉ mục gồm 5 bước:
+  1. Tiếp nhận   quét thư mục, chỉ xử lý file mới / đã sửa (hoặc tất cả khi đổi model embedding)
+  2. Lấy chữ     PDF có chữ, Word, Excel, txt/md/csv: đọc thẳng; trang PDF scan và file ảnh: OCR bằng model thị giác
+  3. Cắt đoạn    chia đoạn, ghi đoạn nằm ở trang / mục / sheet nào
+  4. Vector hóa  model embedding của LM Studio đổi mỗi đoạn thành vector
+  5. Lưu trữ     ghi vào cơ sở dữ liệu SQLite rag_index/index.db (từng tài liệu một, an toàn khi bị ngắt giữa chừng)
 
-Chỉ mục lưu ở rag_index/ và chỉ tính lại những file đã đổi.
+Kết quả OCR được lưu riêng theo nội dung file, nên đổi model embedding hay lập lại chỉ mục không phải OCR lại.
+Khi hỏi: tìm các đoạn gần câu hỏi nhất để biết tài liệu nào liên quan, rồi đưa cho AI đọc cả tài liệu đó
+nếu vừa ngữ cảnh, hoặc các đoạn liên quan nếu tài liệu quá dài.
 """
 from __future__ import annotations
 
 import asyncio
+import base64
+import hashlib
+import io
 import json
 import re
+import sqlite3
 import zipfile
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
@@ -24,38 +32,80 @@ from .core import LM_URL, ROOT
 
 DOCS = ROOT / "Tai_lieu"
 INDEX = ROOT / "rag_index"
-EXTS = {".txt", ".md", ".csv", ".pdf", ".docx", ".xlsx"}
+DB = INDEX / "index.db"
+TEXT_EXTS = {".txt", ".md", ".csv", ".pdf", ".docx", ".xlsx"}
+IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff"}
+EXTS = TEXT_EXTS | IMAGE_EXTS
 CHUNK = 900  # ký tự mỗi đoạn
-VERSION = 2  # đổi cách cắt đoạn thì tăng số này để chỉ mục cũ bị bỏ
+VERSION = 3  # đổi cách cắt đoạn / cấu trúc dữ liệu thì tăng số này để lập lại chỉ mục
+MIN_PAGE_TEXT = 30  # trang PDF có ít hơn số ký tự này coi là trang scan, cần OCR
+OCR_SIDE = 1600  # cạnh dài nhất (px) của ảnh gửi đi OCR
+OCR_PARALLEL = 3  # số trang OCR cùng lúc (LM Studio chạy song song được nhiều yêu cầu)
+OCR_PROMPT = ("Chép lại toàn bộ chữ trong ảnh theo đúng thứ tự đọc. Bảng thì viết thành bảng Markdown. "
+              "Chỉ trả về nội dung, không giải thích.")
 
 Loc = list | None  # ["page", 3] | ["sheet", "Bảng giá"] | ["sec", "2. Thủ tục xin nghỉ"] | None
 
 
-# ----- đọc file ---------------------------------------------------------------------------------
+# ----- bước 2: lấy chữ ----------------------------------------------------------------------------
 def _unxml(s: str) -> str:
     return s.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", '"').replace("&apos;", "'").replace("&amp;", "&")
 
 
-def read_doc(path: Path) -> list[tuple[Loc, str]]:
-    """Các phần của tài liệu kèm vị trí: mỗi trang PDF, mỗi sheet Excel, mỗi mục (theo tiêu đề) của Word/Markdown."""
+def _jpeg(img: Any) -> bytes:
+    img = img.convert("RGB")
+    img.thumbnail((OCR_SIDE, OCR_SIDE))
+    buf = io.BytesIO()
+    img.save(buf, "JPEG", quality=88)
+    return buf.getvalue()
+
+
+def read_parts(path: Path) -> list[dict[str, Any]]:
+    """Các phần của tài liệu kèm vị trí: {loc, text} hoặc {loc, image} nếu phần đó cần OCR.
+    Mỗi trang PDF, mỗi sheet Excel, mỗi mục (theo tiêu đề) Word/Markdown là một phần; file ảnh là một phần cần OCR."""
     ext = path.suffix.lower()
+    if ext in IMAGE_EXTS:
+        from PIL import Image
+
+        with Image.open(path) as im:
+            return [{"loc": None, "page": 1, "image": _jpeg(im)}]
     if ext == ".pdf":
         from pypdf import PdfReader
 
-        return [(["page", n], pg.extract_text() or "") for n, pg in enumerate(PdfReader(str(path)).pages, 1)]
+        out = []
+        scans = []
+        for n, pg in enumerate(PdfReader(str(path)).pages, 1):
+            text = pg.extract_text() or ""
+            if len(text.strip()) >= MIN_PAGE_TEXT:
+                out.append({"loc": ["page", n], "text": text})
+            else:
+                out.append({"loc": ["page", n], "page": n})
+                scans.append(n)
+        if scans:  # trang không có lớp chữ → vẽ thành ảnh để OCR
+            import pypdfium2 as pdfium
+
+            pdf = pdfium.PdfDocument(str(path))
+            try:
+                for part in out:
+                    if "page" in part:
+                        w, h = pdf[part["page"] - 1].get_size()
+                        part["image"] = _jpeg(pdf[part["page"] - 1].render(scale=min(3.0, OCR_SIDE / max(w, h, 1))).to_pil())
+            finally:
+                pdf.close()
+        return out
     if ext == ".docx":
         with zipfile.ZipFile(path) as z:
             xml = z.read("word/document.xml").decode("utf-8", "replace")
-        out: list[tuple[Loc, str]] = [(None, "")]
+        out = [{"loc": None, "text": ""}]
         for p in re.findall(r"<w:p[ >].*?</w:p>", xml, flags=re.S):
             text = _unxml("".join(re.findall(r"<w:t[^>]*>([^<]*)</w:t>", p))).strip()
             if not text:
                 continue
             # Kiểu tiêu đề: "Heading1" (Word tiếng Anh), "u1" (Word tiếng Việt), "Title"
             if re.search(r'<w:pStyle w:val="(Heading\d|u\d|Title)"', p) and len(text) < 200:
-                out.append((["sec", text], text))
+                out.append({"loc": ["sec", text], "text": text})
             else:
-                out[-1] = (out[-1][0], (out[-1][1] + "\n" + text).strip())
+                out[-1]["text"] = (out[-1]["text"] + "\n" + text).strip()
         return out
     if ext == ".xlsx":
         from openpyxl import load_workbook
@@ -64,7 +114,7 @@ def read_doc(path: Path) -> list[tuple[Loc, str]]:
         out = []
         for ws in wb.worksheets:
             rows = [" | ".join(str(c) for c in row if c is not None) for row in ws.iter_rows(values_only=True)]
-            out.append((["sheet", ws.title], "\n".join(r for r in rows if r)))
+            out.append({"loc": ["sheet", ws.title], "text": "\n".join(r for r in rows if r)})
         return out
     raw = path.read_bytes()
     text = raw.decode("utf-8", "replace")
@@ -74,16 +124,57 @@ def read_doc(path: Path) -> list[tuple[Loc, str]]:
             break
         except UnicodeError:
             continue
-    out = [(None, "")]
+    out = [{"loc": None, "text": ""}]
     for line in text.replace("\r", "").split("\n"):  # tiêu đề Markdown (# ...) mở một mục mới
         m = re.match(r"#{1,6}\s+(.+)", line)
         if m:
-            out.append((["sec", m.group(1).strip()], line))
+            out.append({"loc": ["sec", m.group(1).strip()], "text": line})
         else:
-            out[-1] = (out[-1][0], out[-1][1] + "\n" + line)
+            out[-1]["text"] += "\n" + line
     return out
 
 
+def ocr_to_text(s: str) -> str:
+    """Model OCR chuyên dụng (vd. chandra-ocr) trả về HTML có toạ độ; đổi thành chữ thường, bảng thành dòng "a | b"."""
+    if not re.search(r"<(div|table|p)\b", s):
+        return s.strip()
+    import lxml.html
+
+    root = lxml.html.fragment_fromstring(s, create_parent="div")
+    for br in root.iter("br"):  # <br/> trong ô bảng: giữ khoảng trắng giữa hai dòng chữ
+        br.tail = " " + (br.tail or "")
+    lines: list[str] = []
+    for block in root:
+        if block.get("data-label") in ("Image", "Figure", "Picture"):
+            continue
+        tables = block.xpath(".//table") if block.tag != "table" else [block]
+        if tables:
+            for tb in tables:
+                for tr in tb.iter("tr"):
+                    cells = [" ".join(td.text_content().split()) for td in tr if td.tag in ("td", "th")]
+                    if any(cells):
+                        lines.append("| " + " | ".join(cells) + " |")
+            lines.append("")
+        else:
+            t = " ".join(block.text_content().split())
+            if t:
+                lines.append(t)
+    return "\n".join(lines).strip()
+
+
+async def ocr_image(model: str, jpeg: bytes) -> str:
+    payload = {"model": model, "temperature": 0, "max_tokens": 6000, "reasoning_effort": "none",
+               "messages": [{"role": "user", "content": [
+                   {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(jpeg).decode()}},
+                   {"type": "text", "text": OCR_PROMPT}]}]}
+    async with httpx.AsyncClient(timeout=httpx.Timeout(600, connect=5)) as http:
+        r = await http.post(f"{LM_URL}/v1/chat/completions", json=payload)
+    if r.status_code != 200:
+        raise RuntimeError(f"LM Studio trả lỗi {r.status_code} khi OCR: {r.text[:300]}")
+    return r.json()["choices"][0]["message"].get("content") or ""  # bản gốc model trả về; ocr_to_text() khi dùng
+
+
+# ----- bước 3: cắt đoạn ---------------------------------------------------------------------------
 def split(text: str) -> list[str]:
     """Cắt theo đoạn văn, gom lại cho gần CHUNK ký tự."""
     parts: list[str] = []
@@ -98,17 +189,10 @@ def split(text: str) -> list[str]:
             parts.append(para)
     out: list[str] = []
     for p in parts:
-        if out and len(out[-1]) + len(p) < CHUNK:
+        if out and (len(out[-1]) + len(p) < CHUNK or len(p) < 40):  # mẩu quá ngắn (chữ ký, số trang) gộp vào đoạn trước
             out[-1] += "\n\n" + p
         else:
             out.append(p)
-    return out
-
-
-def doc_chunks(path: Path) -> list[dict[str, Any]]:
-    out = []
-    for loc, text in read_doc(path):
-        out += [{"loc": loc, "text": t} for t in split(text)]
     return out
 
 
@@ -129,13 +213,21 @@ def rel(p: Path) -> str:
     return p.relative_to(DOCS).as_posix()
 
 
-# ----- embedding --------------------------------------------------------------------------------
+def sha1(path: Path) -> str:
+    h = hashlib.sha1()
+    with path.open("rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+# ----- bước 4: embedding --------------------------------------------------------------------------
 def _prefix(model: str, query: bool) -> str:
     """Một số model embedding cần câu dẫn riêng cho câu hỏi và cho tài liệu."""
     m = model.lower()
     if "nomic" in m:
         return "search_query: " if query else "search_document: "
-    if "qwen3-embedding" in m and query:
+    if ("qwen3-embedding" in m or "qwen3-vl-embedding" in m) and query:
         return "Instruct: Given a question, retrieve passages from internal documents that answer it\nQuery: "
     if "e5" in m:
         return "query: " if query else "passage: "
@@ -157,31 +249,57 @@ async def embed(model: str, texts: list[str], query: bool = False) -> np.ndarray
     return v / np.maximum(np.linalg.norm(v, axis=1, keepdims=True), 1e-9)
 
 
-# ----- chỉ mục ----------------------------------------------------------------------------------
+# ----- bước 5: cơ sở dữ liệu ----------------------------------------------------------------------
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS docs (path TEXT PRIMARY KEY, mtime REAL, size INTEGER, sha1 TEXT,
+                                 n INTEGER, note TEXT, ocr_pages INTEGER, ocr_missing INTEGER);
+CREATE TABLE IF NOT EXISTS chunks (doc TEXT, i INTEGER, loc TEXT, text TEXT, ocr INTEGER, vec BLOB, PRIMARY KEY (doc, i));
+CREATE TABLE IF NOT EXISTS ocr (sha1 TEXT, page INTEGER, model TEXT, text TEXT, PRIMARY KEY (sha1, page, model));
+"""
+
+
+def connect() -> sqlite3.Connection:
+    INDEX.mkdir(exist_ok=True)
+    db = sqlite3.connect(DB, timeout=30)
+    db.execute("PRAGMA journal_mode=WAL")
+    db.executescript(SCHEMA)
+    if (db.execute("SELECT value FROM meta WHERE key='version'").fetchone() or [None])[0] != str(VERSION):
+        with db:  # chỉ mục kiểu cũ: bỏ chỉ mục, giữ kết quả OCR
+            db.execute("DELETE FROM chunks")
+            db.execute("DELETE FROM docs")
+            db.execute("INSERT OR REPLACE INTO meta VALUES ('version', ?)", (str(VERSION),))
+            db.execute("DELETE FROM meta WHERE key='model'")
+    return db
+
+
 class Index:
+    """Bản sao trong bộ nhớ của chỉ mục (để tìm nhanh); nguồn gốc là SQLite."""
+
     def __init__(self) -> None:
         self.model = ""
-        self.files: dict[str, dict[str, Any]] = {}  # rel -> {mtime, size, n, note}
-        self.chunks: list[dict[str, Any]] = []  # {doc, i, loc, text}
+        self.files: dict[str, dict[str, Any]] = {}  # rel -> {mtime, size, n, note, ocr_pages, ocr_missing}
+        self.chunks: list[dict[str, Any]] = []  # {doc, i, loc, text, ocr}
         self.vecs = np.zeros((0, 1), dtype=np.float32)
 
     @classmethod
     def load(cls) -> "Index":
         ix = cls()
+        db = connect()
         try:
-            meta = json.loads((INDEX / "index.json").read_text(encoding="utf-8"))
-            vecs = np.load(INDEX / "vectors.npy")
-            if meta.get("version") == VERSION and len(meta["chunks"]) == len(vecs):
-                ix.model, ix.files, ix.chunks, ix.vecs = meta["model"], meta["files"], meta["chunks"], vecs
-        except (OSError, ValueError, KeyError):
-            pass
+            ix.model = (db.execute("SELECT value FROM meta WHERE key='model'").fetchone() or [""])[0]
+            for path, mtime, size, n, note, op, om in db.execute(
+                    "SELECT path, mtime, size, n, note, ocr_pages, ocr_missing FROM docs"):
+                ix.files[path] = {"mtime": mtime, "size": size, "n": n, "note": note or "", "ocr_pages": op or 0, "ocr_missing": om or 0}
+            vecs = []
+            for doc, i, loc, text, ocr, vec in db.execute("SELECT doc, i, loc, text, ocr, vec FROM chunks ORDER BY doc, i"):
+                ix.chunks.append({"doc": doc, "i": i, "loc": json.loads(loc) if loc else None, "text": text, "ocr": bool(ocr)})
+                vecs.append(np.frombuffer(vec, dtype=np.float32))
+            if vecs:
+                ix.vecs = np.stack(vecs)
+        finally:
+            db.close()
         return ix
-
-    def save(self) -> None:
-        INDEX.mkdir(exist_ok=True)
-        np.save(INDEX / "vectors.npy", self.vecs)
-        (INDEX / "index.json").write_text(json.dumps(
-            {"version": VERSION, "model": self.model, "files": self.files, "chunks": self.chunks}, ensure_ascii=False), encoding="utf-8")
 
     def stale(self) -> list[str]:
         """Các file mới hoặc đã đổi so với chỉ mục."""
@@ -196,43 +314,117 @@ class Index:
         return [c for c in self.chunks if c["doc"] == doc]
 
 
-async def build(model: str, progress: dict[str, Any]) -> Index:
-    """Lập lại chỉ mục; file không đổi (và cùng model embedding) thì dùng lại vector cũ."""
-    old = Index.load()
-    reuse = old.model == model
-    new = Index()
-    new.model = model
-    vecs: list[np.ndarray] = []
-    files = list_files()
-    progress.update(total=len(files), done=0, file="")
-    for p in files:
-        r, s = rel(p), p.stat()
-        progress["file"] = r
-        f = old.files.get(r)
-        if reuse and f and f["mtime"] == s.st_mtime and f["size"] == s.st_size:
-            idx = [k for k, c in enumerate(old.chunks) if c["doc"] == r]
-            new.chunks += [old.chunks[k] for k in idx]
-            if idx:
-                vecs.append(old.vecs[idx])
-            new.files[r] = f
-        else:
-            note = ""
+class Cancelled(Exception):
+    pass
+
+
+async def build(embed_model: str, ocr_model: str, progress: dict[str, Any],
+                prepare_ocr: Callable[[str], Awaitable[None]], prepare_embed: Callable[[str], Awaitable[None]]) -> Index:
+    """Lập chỉ mục 5 bước. `progress` được cập nhật liên tục cho giao diện; progress["cancel"] = True để dừng
+    (phần đã làm được giữ lại: trang đã OCR, tài liệu đã lưu)."""
+    def check() -> None:
+        if progress.get("cancel"):
+            raise Cancelled
+
+    db = connect()
+    try:
+        # ---- bước 1: tiếp nhận
+        progress.update(stage="scan", done=0, total=0, file="")
+        old = Index.load()
+        files = list_files()
+        names = {rel(p) for p in files}
+        with db:
+            for gone in set(old.files) - names:  # file đã bị xoá khỏi thư mục
+                db.execute("DELETE FROM docs WHERE path=?", (gone,))
+                db.execute("DELETE FROM chunks WHERE doc=?", (gone,))
+            if old.model != embed_model:  # đổi model embedding: mọi vector cũ không dùng được nữa
+                db.execute("DELETE FROM docs")
+                db.execute("DELETE FROM chunks")
+                db.execute("INSERT OR REPLACE INTO meta VALUES ('model', ?)", (embed_model,))
+        todo = files if old.model != embed_model else [p for p in files if rel(p) in set(old.stale())]
+        # Tài liệu có trang scan chưa OCR được (lần trước chưa chọn model OCR) thì làm lại khi đã có model OCR.
+        if ocr_model:
+            todo += [p for p in files if p not in todo and (old.files.get(rel(p)) or {}).get("ocr_missing")]
+
+        # ---- bước 2a: đọc chữ có sẵn, tìm các trang cần OCR
+        progress.update(stage="read", done=0, total=len(todo))
+        docs: list[dict[str, Any]] = []
+        for p in todo:
+            check()
+            progress["file"] = rel(p)
+            d = {"path": p, "rel": rel(p), "stat": p.stat(), "note": "", "parts": []}
             try:
-                parts = await asyncio.to_thread(doc_chunks, p)
-                if not parts:
-                    note = "empty"  # không có chữ (thường là PDF scan)
+                d["sha1"] = await asyncio.to_thread(sha1, p)
+                d["parts"] = await asyncio.to_thread(read_parts, p)
             except Exception as e:  # noqa: BLE001
-                parts, note = [], f"error: {e}"
-            head = r.rsplit(".", 1)[0].replace("/", " > ")  # đường dẫn thư mục và tên mục giúp tìm đúng tài liệu
-            texts = [f"{head}{' > ' + str(c['loc'][1]) if c['loc'] and c['loc'][0] == 'sec' else ''}\n{c['text']}" for c in parts]
-            for b in range(0, len(texts), 16):
-                vecs.append(await embed(model, texts[b:b + 16]))
-            new.chunks += [{"doc": r, "i": i, **c} for i, c in enumerate(parts)]
-            new.files[r] = {"mtime": s.st_mtime, "size": s.st_size, "n": len(parts), "note": note}
-        progress["done"] += 1
-    new.vecs = np.concatenate(vecs) if vecs else np.zeros((0, 1), dtype=np.float32)
-    new.save()
-    return new
+                d["note"], d["sha1"] = f"error: {e}", ""
+            docs.append(d)
+            progress["done"] += 1
+
+        # ---- bước 2b: OCR (dùng lại kết quả đã lưu nếu có)
+        need = []
+        for d in docs:
+            for part in d["parts"]:
+                if "image" not in part:
+                    continue
+                row = db.execute("SELECT text FROM ocr WHERE sha1=? AND page=? AND model=?",
+                                 (d["sha1"], part["page"], ocr_model)).fetchone() if ocr_model else None
+                if row:
+                    part["text"], part["ocr"] = ocr_to_text(row[0]), True
+                elif ocr_model:
+                    need.append((d, part))
+        if need:
+            progress.update(stage="ocr", done=0, total=len(need), file="")
+            await prepare_ocr(ocr_model)
+            queue = list(need)
+
+            async def worker() -> None:
+                while queue:
+                    check()
+                    d, part = queue.pop(0)
+                    progress["file"] = f"{d['rel']} · trang {part['page']}" if d["path"].suffix.lower() == ".pdf" else d["rel"]
+                    try:
+                        raw = await ocr_image(ocr_model, part["image"])
+                    except BaseException:
+                        queue.clear()  # một trang lỗi thì các luồng khác cũng dừng
+                        raise
+                    part["text"], part["ocr"] = ocr_to_text(raw), True
+                    with db:  # lưu bản gốc để sau này đổi cách chuyển HTML → chữ vẫn không phải OCR lại
+                        db.execute("INSERT OR REPLACE INTO ocr VALUES (?, ?, ?, ?)", (d["sha1"], part["page"], ocr_model, raw))
+                    progress["done"] += 1
+
+            await asyncio.gather(*(worker() for _ in range(OCR_PARALLEL)))
+
+        # ---- bước 3 + 4 + 5: cắt đoạn, vector hóa, lưu từng tài liệu
+        progress.update(stage="embed", done=0, total=len(docs), file="")
+        if docs:
+            await prepare_embed(embed_model)
+        for d in docs:
+            check()
+            progress["file"] = d["rel"]
+            chunks = []
+            for part in d["parts"]:
+                if part.get("text"):
+                    chunks += [{"loc": part["loc"], "text": t, "ocr": bool(part.get("ocr"))} for t in split(part["text"])]
+            missing = sum(1 for part in d["parts"] if "image" in part and not part.get("ocr"))
+            ocr_pages = sum(1 for part in d["parts"] if part.get("ocr"))
+            note = d["note"] or ("empty" if not chunks and missing else "")
+            head = d["rel"].rsplit(".", 1)[0].replace("/", " > ")  # đường dẫn thư mục và tên mục giúp tìm đúng tài liệu
+            texts = [f"{head}{' > ' + str(c['loc'][1]) if c['loc'] and c['loc'][0] == 'sec' else ''}\n{c['text']}" for c in chunks]
+            vecs = [await embed(embed_model, texts[b:b + 16]) for b in range(0, len(texts), 16)]
+            vec = np.concatenate(vecs) if vecs else np.zeros((0, 1), dtype=np.float32)
+            st = d["stat"]
+            with db:  # 1 tài liệu = 1 giao dịch: ngắt giữa chừng thì tài liệu này chưa có, lần sau làm lại
+                db.execute("DELETE FROM chunks WHERE doc=?", (d["rel"],))
+                db.executemany("INSERT INTO chunks VALUES (?, ?, ?, ?, ?, ?)", [
+                    (d["rel"], i, json.dumps(c["loc"], ensure_ascii=False) if c["loc"] else None, c["text"], int(c["ocr"]),
+                     vec[i].astype(np.float32).tobytes()) for i, c in enumerate(chunks)])
+                db.execute("INSERT OR REPLACE INTO docs VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                           (d["rel"], st.st_mtime, st.st_size, d["sha1"], len(chunks), note, ocr_pages, missing))
+            progress["done"] += 1
+    finally:
+        db.close()
+    return Index.load()
 
 
 # ----- tìm và chọn đoạn cho AI đọc --------------------------------------------------------------
@@ -246,11 +438,23 @@ async def retrieve(ix: Index, query: str, budget: int, top_docs: int = 3) -> lis
     if not ix.chunks:
         return []
     q = (await embed(ix.model, [query], query=True))[0]
-    score = ix.vecs @ q
+    vec = ix.vecs @ q
+    cw = [words(c["doc"] + " " + c["text"]) for c in ix.chunks]
     qw = words(query)
-    if qw:  # cộng điểm trùng từ khóa: bù cho model embedding yếu tiếng Việt, tên riêng, mã số
-        kw = np.array([len(qw & words(c["doc"] + " " + c["text"])) / len(qw) for c in ix.chunks], dtype=np.float32)
-        score = score + 0.3 * kw
+
+    def keyword(idx: list[int]) -> np.ndarray:
+        """Điểm trùng từ khóa của các đoạn idx (0..1). Từ càng hiếm trong nhóm đoạn này càng nặng ký (IDF);
+        từ của câu hỏi không có trong nhóm (vd. "theo", "bao nhiêu") thì bỏ qua."""
+        df = {w: sum(1 for k in idx if w in cw[k]) for w in qw}
+        idf = {w: float(np.log(1 + len(idx) / n)) for w, n in df.items() if n}
+        total = sum(idf.values())
+        if not total:
+            return np.zeros(len(idx), dtype=np.float32)
+        return np.array([sum(v for w, v in idf.items() if w in cw[k]) / total for k in idx], dtype=np.float32)
+
+    # Tầng 1 – chọn tài liệu: vector + từ khóa trên toàn bộ chỉ mục (tìm kiếm lai, bù cho model embedding
+    # yếu tiếng Việt, tên riêng, mã số).
+    score = vec + 0.3 * keyword(list(range(len(ix.chunks))))
     best = np.argsort(-score)[:10]
     docs: dict[str, float] = {}
     for k in best:  # điểm tài liệu = đoạn tốt nhất + chút thưởng cho mỗi đoạn trúng thêm
@@ -258,6 +462,9 @@ async def retrieve(ix: Index, query: str, budget: int, top_docs: int = 3) -> lis
         docs[d] = docs[d] + 0.05 if d in docs else float(score[k])
     ranked = sorted(docs, key=lambda d: -docs[d])[:top_docs]
     ranked = [d for d in ranked if docs[d] >= docs[ranked[0]] - 0.25]  # bỏ tài liệu kém xa tài liệu đầu
+    pos = {}
+    for k, c in enumerate(ix.chunks):
+        pos.setdefault(c["doc"], []).append(k)
 
     out: list[dict[str, Any]] = []
     left = budget
@@ -267,8 +474,12 @@ async def retrieve(ix: Index, query: str, budget: int, top_docs: int = 3) -> lis
         if sum(len(c["text"]) for c in mine) <= share:
             keep = list(range(len(mine)))
         else:
+            # Tầng 2 – chọn đoạn trong tài liệu dài: từ khóa hiếm *trong tài liệu này* (vd. "Tilting" giữa hàng chục
+            # trang bảng na ná nhau) được tính nặng, rồi lấy các đoạn trúng nhất kèm đoạn liền trước/sau.
+            idx = pos[d]
+            local = vec[idx] + 0.5 * keyword(idx)
             want: list[int] = []
-            for i in (ix.chunks[k]["i"] for k in best if ix.chunks[k]["doc"] == d):
+            for i in (ix.chunks[idx[j]]["i"] for j in np.argsort(-local)[:8]):
                 for j in (i, i - 1, i + 1):
                     if 0 <= j < len(mine) and j not in want:
                         want.append(j)

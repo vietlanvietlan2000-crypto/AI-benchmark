@@ -20,11 +20,12 @@ from .lmstudio import LMStudio, _lms
 
 router = APIRouter(prefix="/api/chat")
 busy: Callable[[], Any] = lambda: None  # server.py gán: trả job benchmark đang chạy (nếu có)
-indexing: dict[str, Any] = {"running": False, "done": 0, "total": 0, "file": "", "error": None}
+indexing: dict[str, Any] = {"running": False, "stage": "", "done": 0, "total": 0, "file": "", "error": None, "cancel": False}
 _index: rag.Index | None = None
 
 CTX_WANT = 16384  # ngữ cảnh khi chatbot tự nạp model (đủ để đọc trọn tài liệu vài trang)
 EMBED_CTX = 4096  # ngữ cảnh của model embedding: mỗi đoạn tài liệu chỉ dài khoảng 1.200 ký tự
+OCR_CTX = 16384  # ngữ cảnh của model OCR: ảnh 1 trang ~2.200 token + chữ đọc ra, nhân số trang OCR cùng lúc
 SYSTEM = (
     "Bạn là trợ lý tra cứu. Chỉ trả lời dựa trên các NGUỒN THAM KHẢO được đánh số trong tin nhắn. "
     "Sau mỗi ý, ghi số của nguồn đã dùng trong ngoặc vuông, ví dụ [2] hoặc [1][3]. "
@@ -50,6 +51,8 @@ def index() -> rag.Index:
 def _check_idle() -> None:
     if busy():
         raise HTTPException(409, "Đang có một bài test chạy, hãy đợi hoặc huỷ nó trước")
+    if indexing["running"]:
+        raise HTTPException(409, "Đang lập chỉ mục tài liệu, hãy đợi xong hoặc bấm Dừng")
 
 
 @router.get("/state")
@@ -62,7 +65,8 @@ async def state() -> dict[str, Any]:
             r = rag.rel(p)
             f = ix.files.get(r) or {}
             files.append({"path": r, "kb": round(p.stat().st_size / 1024, 1), "indexed": r in ix.files and r not in stale,
-                          "chunks": f.get("n", 0), "note": f.get("note", "")})
+                          "chunks": f.get("n", 0), "note": f.get("note", ""), "ocr_pages": f.get("ocr_pages", 0),
+                          "ocr_missing": f.get("ocr_missing", 0)})
         return {"docs_dir": str(rag.DOCS), "exts": sorted(rag.EXTS), "files": files, "embed_model": ix.model,
                 "chunks": len(ix.chunks), "indexing": indexing}
 
@@ -71,25 +75,59 @@ async def state() -> dict[str, Any]:
 
 @router.post("/index")
 async def build_index(body: dict[str, Any]) -> dict[str, Any]:
-    _check_idle()
-    model = str(body.get("embed_model") or "")
-    if not model:
-        raise HTTPException(400, "Chưa chọn model embedding")
     if indexing["running"]:
         return {"ok": True}
-    indexing.update(running=True, done=0, total=0, file="", error=None)
+    _check_idle()
+    model, ocr_model = str(body.get("embed_model") or ""), str(body.get("ocr_model") or "")
+    if not model:
+        raise HTTPException(400, "Chưa chọn model embedding")
+    indexing.update(running=True, stage="scan", done=0, total=0, file="", error=None, cancel=False)
+
+    async def prepare_ocr(m: str) -> None:
+        """Gỡ mọi model khác để model OCR có đủ VRAM, rồi nạp model OCR."""
+        lm = LMStudio(LM_URL)
+        try:
+            models = await lm.list_models()
+        finally:
+            await lm.close()
+        info = next((x for x in models if x["id"] == m), None)
+        if info is None:
+            raise RuntimeError(f"LM Studio không có model {m}")
+        for x in models:
+            if x.get("state") == "loaded" and x["id"] != m:
+                await _lms("unload", x["id"], timeout=120)
+        if info.get("state") != "loaded":
+            await _lms("load", m, "-y", "-c", str(min(OCR_CTX, info.get("max_context_length") or OCR_CTX)))
+
+    async def prepare_embed(m: str) -> None:
+        if ocr_model and ocr_model != m:  # OCR xong thì gỡ model OCR để nhường VRAM
+            try:
+                await _lms("unload", ocr_model, timeout=120)
+            except RuntimeError:
+                pass  # model OCR không được nạp (không có trang nào cần OCR)
+        await _prepare_embed(m)
 
     async def work() -> None:
         global _index
         try:
-            await _prepare_embed(model)
-            _index = await rag.build(model, indexing)
+            _index = await rag.build(model, ocr_model, indexing, prepare_ocr, prepare_embed)
+        except rag.Cancelled:
+            indexing["error"] = "Đã dừng. Phần đã làm (trang đã OCR, tài liệu đã lưu) được giữ lại, bấm Cập nhật chỉ mục để làm tiếp."
         except Exception as e:  # noqa: BLE001
             indexing["error"] = str(e) or type(e).__name__
         finally:
-            indexing["running"] = False
+            if indexing["error"]:
+                _index = None  # đọc lại từ cơ sở dữ liệu những tài liệu đã lưu được
+            indexing.update(running=False, stage="", cancel=False)
 
     asyncio.get_running_loop().create_task(work())
+    return {"ok": True}
+
+
+@router.post("/index/cancel")
+async def cancel_index() -> dict[str, Any]:
+    if indexing["running"]:
+        indexing["cancel"] = True
     return {"ok": True}
 
 
@@ -148,7 +186,7 @@ async def get_doc(path: str) -> dict[str, Any]:
     chunks = index().of(path)
     if not chunks:
         raise HTTPException(404, "Tài liệu này chưa có trong chỉ mục")
-    return {"path": path, "chunks": [{"i": c["i"], "loc": c.get("loc"), "text": c["text"]} for c in chunks]}
+    return {"path": path, "chunks": [{"i": c["i"], "loc": c.get("loc"), "text": c["text"], "ocr": c.get("ocr", False)} for c in chunks]}
 
 
 def _num(v: Any) -> Any:

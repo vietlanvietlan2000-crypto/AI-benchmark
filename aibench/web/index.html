@@ -224,6 +224,11 @@
   .vchunk mark { background: rgba(250, 204, 21, .75); color: #131a26; border-radius: 2px; padding: 0 1px; }
   .chatin { display: flex; gap: 8px; margin-top: 12px; align-items: flex-end; }
   .chatin textarea { flex: 1; resize: vertical; min-height: 44px; }
+  .steps { display: flex; gap: 4px; margin-top: 10px; font-size: 11.5px; }
+  .steps span { flex: 1; text-align: center; padding: 4px 2px; border-radius: 6px; background: var(--field); color: var(--muted); border: 1px solid var(--line); }
+  .steps span.on { border-color: var(--accent); color: var(--accent); font-weight: 700; background: var(--soft); }
+  .steps span.ok { color: var(--ok); }
+  .vloc .ocr { margin-left: 6px; padding: 0 6px; border-radius: 999px; border: 1px solid currentColor; font-size: 10px; }
   .tree { margin-top: 10px; font-size: 12.5px; max-height: 38vh; overflow: auto; }
   .tree .dir { font-weight: 700; margin-top: 6px; }
   .tree .f { display: flex; gap: 6px; cursor: pointer; padding: 1px 0; }
@@ -308,11 +313,17 @@
       <label for="chatEmbed" data-i18n="chatEmbed"></label>
       <select id="chatEmbed"></select>
       <div class="help" data-i18n="chatEmbedHelp"></div>
+      <div class="fit warn" id="embedWarn" hidden></div>
     </div>
     <div class="card">
       <h2 data-i18n="docsTitle"></h2>
       <div class="help" id="docsDir" style="word-break:break-all"></div>
-      <div class="row"><button id="docsOpen" data-i18n="docsOpen"></button><button class="primary" id="docsIndex" data-i18n="docsIndex"></button></div>
+      <label for="chatOcr" data-i18n="ocrLabel"></label>
+      <select id="chatOcr"></select>
+      <div class="help" data-i18n="ocrHelp"></div>
+      <div class="row"><button id="docsOpen" data-i18n="docsOpen"></button><button class="primary" id="docsIndex" data-i18n="docsIndex"></button>
+        <button id="docsCancel" hidden data-i18n="docsCancel"></button></div>
+      <div class="steps" id="docsSteps" hidden></div>
       <div class="bar" id="docsBarWrap" hidden><div id="docsBar"></div></div>
       <div class="help" id="docsStatus" style="margin-top:8px"></div>
       <div class="tree" id="docsTree"></div>
@@ -380,6 +391,9 @@ const T = {
     viewOpenFile: "Mở file gốc", viewOpenWeb: "Mở trang web", viewLoading: "Đang mở…",
     chatSetup: "Chatbot", chatModel: "Model trả lời", chatUseDocs: "Tra cứu tài liệu trước khi trả lời",
     chatUseDocsHelp: "Bật: AI chỉ trả lời theo tài liệu trong thư mục bên dưới. Tắt: chat tự do với model.",
+    embedGroupOk: "Model embedding (dùng được ngay)", embedGroupOther: "Model khác (cần đổi loại trong LM Studio)",
+    embedWarnT: "LM Studio đang xếp model này vào loại model chat",
+    embedWarn: m => `Muốn dùng ${m} để lập chỉ mục, hãy đổi loại model trong LM Studio: mở tab My Models → bấm ⚙ (Edit model default config) ở dòng của model → mục "Override Domain Type" chọn "Embedding". Đổi xong, model tự chuyển lên nhóm "Model embedding" ở ô này (vài giây), rồi bấm "Cập nhật chỉ mục". Chỉ những model được huấn luyện để tạo embedding (tên thường có chữ "embed") mới cho kết quả tìm kiếm tốt.`,
     chatEmbed: "Model lập chỉ mục (embedding)", chatEmbedHelp: "Dùng để tìm tài liệu liên quan. Đổi model này thì phải lập lại chỉ mục.",
     docsTitle: "Tài liệu", docsOpen: "Mở thư mục", docsIndex: "Cập nhật chỉ mục", chatSend: "Gửi", chatNew: "Cuộc trò chuyện mới",
     chatPlaceholder: "Nhập câu hỏi… (Enter để gửi, Shift+Enter để xuống dòng)",
@@ -387,6 +401,16 @@ const T = {
     docsDir: (d, ext) => `Bỏ tài liệu vào thư mục này, chia thư mục con tùy ý: ${d}\nLoại file đọc được: ${ext}`,
     docsNone: "Thư mục chưa có tài liệu nào.", docsNoEmbed: "LM Studio chưa có model embedding nào. Hãy tải một model (ví dụ bge-m3) trong LM Studio.",
     docsIndexing: (a, b, f) => `Đang lập chỉ mục ${a}/${b}: ${f}`,
+    ocrLabel: "Model OCR (đọc PDF scan và file ảnh)", ocrNone: "(Không OCR – bỏ qua trang scan)",
+    ocrHelp: "Model thị giác chép chữ từ trang scan / ảnh. Kết quả OCR được lưu lại nên lần sau không phải đọc lại. Mỗi trang mất khoảng 5–20 giây.",
+    docsCancel: "Dừng", stepScan: "1. Tiếp nhận", stepRead: "2. Lấy chữ", stepOcr: "2. OCR", stepEmbed: "3–5. Vector hóa, lưu",
+    stScan: "Bước 1 · Đang quét thư mục tài liệu…",
+    stRead: (a, b, f) => `Bước 2 · Đọc chữ ${a}/${b}: ${f}`,
+    stOcr: (a, b, f) => `Bước 2 · OCR trang ${a}/${b}${f ? ": " + f : ""}`,
+    stEmbed: (a, b, f) => `Bước 3–5 · Cắt đoạn, vector hóa và lưu ${a}/${b}: ${f}`,
+    stCancel: "Đang dừng…",
+    fOcr: n => `, đã OCR ${n} trang`, fOcrMissing: n => `${n} trang scan chưa OCR – chọn model OCR rồi bấm "Cập nhật chỉ mục"`,
+    docsOcrMissing: n => `${n} tài liệu có trang scan chưa OCR. Chọn model OCR rồi bấm "Cập nhật chỉ mục".`,
     docsReady: (n, c, m) => `Đã lập chỉ mục ${n} tài liệu (${c} đoạn) bằng ${m}.`,
     docsStale: n => `Có ${n} tài liệu mới hoặc đã sửa chưa được lập chỉ mục. Bấm "Cập nhật chỉ mục".`,
     docsOtherModel: m => `Chỉ mục hiện tại lập bằng ${m}. Bấm "Cập nhật chỉ mục" để lập lại bằng model đang chọn.`,
@@ -463,6 +487,9 @@ const T = {
     viewOpenFile: "Open the original file", viewOpenWeb: "Open the web page", viewLoading: "Opening…",
     chatSetup: "Chatbot", chatModel: "Answering model", chatUseDocs: "Look up documents before answering",
     chatUseDocsHelp: "On: the AI answers only from the documents in the folder below. Off: free chat with the model.",
+    embedGroupOk: "Embedding models (ready)", embedGroupOther: "Other models (type must be changed in LM Studio)",
+    embedWarnT: "LM Studio classifies this model as a chat model",
+    embedWarn: m => `To index with ${m}, change its type in LM Studio: open My Models → click ⚙ (Edit model default config) on the model's row → set "Override Domain Type" to "Embedding". The model then moves to the "Embedding models" group here within a few seconds; click "Update index". Only models trained to produce embeddings (usually with "embed" in the name) give good search results.`,
     chatEmbed: "Indexing (embedding) model", chatEmbedHelp: "Used to find the relevant documents. Changing it requires re-indexing.",
     docsTitle: "Documents", docsOpen: "Open folder", docsIndex: "Update index", chatSend: "Send", chatNew: "New conversation",
     chatPlaceholder: "Type a question… (Enter to send, Shift+Enter for a new line)",
@@ -470,6 +497,16 @@ const T = {
     docsDir: (d, ext) => `Put documents in this folder, with any subfolders you like: ${d}\nReadable file types: ${ext}`,
     docsNone: "The folder has no documents yet.", docsNoEmbed: "LM Studio has no embedding model. Download one (e.g. bge-m3) in LM Studio.",
     docsIndexing: (a, b, f) => `Indexing ${a}/${b}: ${f}`,
+    ocrLabel: "OCR model (reads scanned PDFs and images)", ocrNone: "(No OCR – skip scanned pages)",
+    ocrHelp: "A vision model transcribes scanned pages / images. OCR results are saved, so they are not read again next time. Each page takes about 5–20 s.",
+    docsCancel: "Stop", stepScan: "1. Intake", stepRead: "2. Extract text", stepOcr: "2. OCR", stepEmbed: "3–5. Embed, store",
+    stScan: "Step 1 · Scanning the documents folder…",
+    stRead: (a, b, f) => `Step 2 · Reading text ${a}/${b}: ${f}`,
+    stOcr: (a, b, f) => `Step 2 · OCR page ${a}/${b}${f ? ": " + f : ""}`,
+    stEmbed: (a, b, f) => `Steps 3–5 · Splitting, embedding and storing ${a}/${b}: ${f}`,
+    stCancel: "Stopping…",
+    fOcr: n => `, ${n} page(s) OCR'd`, fOcrMissing: n => `${n} scanned page(s) not OCR'd – pick an OCR model and click "Update index"`,
+    docsOcrMissing: n => `${n} document(s) have scanned pages that are not OCR'd. Pick an OCR model and click "Update index".`,
     docsReady: (n, c, m) => `${n} documents indexed (${c} passages) with ${m}.`,
     docsStale: n => `${n} new or edited document(s) are not indexed yet. Click "Update index".`,
     docsOtherModel: m => `The current index was built with ${m}. Click "Update index" to rebuild it with the selected model.`,
@@ -512,7 +549,9 @@ const t = (k, ...a) => { const v = T[lang][k]; return typeof v === "function" ? 
 // ----- Chữ do server/module trả về (tiếng Việt) → tiếng Anh. Dịch ở giao diện nên kết quả cũ trong lịch sử cũng đổi được. -----
 // Thêm module mới: bổ sung các chuỗi tiếng Việt của module vào đây; chuỗi chưa có sẽ hiện nguyên tiếng Việt.
 const D = {
-  "Đang tìm kiếm trên internet…": "Searching the internet…", "Tài liệu này chưa có trong chỉ mục": "This document is not in the index",
+  "Đang tìm kiếm trên internet…": "Searching the internet…",
+  "Đang lập chỉ mục tài liệu, hãy đợi xong hoặc bấm Dừng": "Documents are being indexed; wait or click Stop",
+  "Đã dừng. Phần đã làm (trang đã OCR, tài liệu đã lưu) được giữ lại, bấm Cập nhật chỉ mục để làm tiếp.": "Stopped. Work done so far (OCR'd pages, stored documents) is kept; click Update index to continue.", "Tài liệu này chưa có trong chỉ mục": "This document is not in the index",
   "Không tìm được kết quả trên internet (nguồn tìm kiếm không phản hồi). Hãy thử lại sau ít giây.": "No internet results (the search source did not respond). Try again in a few seconds.",
   "Không có dữ liệu để xuất": "Nothing to export",
   "Đang nạp model…": "Loading the model…", "Đang tìm tài liệu liên quan…": "Finding relevant documents…", "Model đang suy nghĩ…": "The model is thinking…",
@@ -1154,17 +1193,33 @@ function setView(v) {
 $("viewBench").onclick = () => setView("bench");
 $("viewChat").onclick = () => setView("chat");
 function fillChatModels() {
-  const fill = (id, list, pick) => {
+  const opt = m => `<option value="${esc(m.id)}">${esc(m.id)}${m.quantization ? ` (${esc(m.quantization)})` : ""}${m.state === "loaded" ? t("loaded") : ""}</option>`;
+  const fill = (id, list, pick, html) => {
     const el = $(id); if (document.activeElement === el) return;
     const cur = el.value || store.get(id) || pick(list) || "";
-    el.innerHTML = list.map(m => `<option value="${esc(m.id)}">${esc(m.id)}${m.quantization ? ` (${esc(m.quantization)})` : ""}${m.state === "loaded" ? t("loaded") : ""}</option>`).join("");
+    el.innerHTML = html || list.map(opt).join("");
     if (list.some(m => m.id === cur)) el.value = cur;
   };
-  fill("chatModel", models.filter(m => m.type !== "embeddings"), l => (l.find(m => m.state === "loaded") || {}).id);
-  fill("chatEmbed", models.filter(m => m.type === "embeddings"),
-       l => (chatState && chatState.embed_model) || (l.find(m => /qwen3-embedding|bge-m3|e5/i.test(m.id)) || {}).id);
+  // Model tên có "embed" (vd. Qwen3 VL Embedding bị LM Studio xếp là model thị giác) không dùng để trả lời được: đưa xuống cuối.
+  const chatList = models.filter(m => m.type !== "embeddings").sort((a, b) => /embed/i.test(a.id) - /embed/i.test(b.id));
+  fill("chatModel", chatList, l => (l.find(m => m.state === "loaded" && !/embed/i.test(m.id)) || l[0] || {}).id);
+  // Ô embedding liệt kê mọi model: nhóm dùng được ngay, rồi các model khác (model tên có "embed" lên đầu).
+  const emb = models.filter(m => m.type === "embeddings");
+  const other = models.filter(m => m.type !== "embeddings").sort((a, b) => /embed/i.test(b.id) - /embed/i.test(a.id));
+  const vis = models.filter(m => m.type === "vlm").sort((a, b) => /ocr/i.test(b.id) - /ocr/i.test(a.id));
+  const ocrEl = $("chatOcr");
+  if (document.activeElement !== ocrEl && models.length) {  // đợi có danh sách model rồi mới chọn mặc định
+    const saved = store.get("chatOcr");
+    const want = ocrEl.dataset.init ? ocrEl.value : (saved !== null ? saved : ((vis.find(m => /ocr/i.test(m.id)) || {}).id || ""));
+    ocrEl.innerHTML = `<option value="">${esc(t("ocrNone"))}</option>` + vis.map(opt).join("");
+    ocrEl.value = vis.some(m => m.id === want) ? want : ""; ocrEl.dataset.init = "1";
+  }
+  fill("chatEmbed", [...emb, ...other],
+       () => (chatState && chatState.embed_model) || (emb.find(m => /qwen3-embedding|bge-m3|e5/i.test(m.id)) || emb[0] || {}).id,
+       (emb.length ? `<optgroup label="${esc(t("embedGroupOk"))}">${emb.map(opt).join("")}</optgroup>` : "")
+       + (other.length ? `<optgroup label="${esc(t("embedGroupOther"))}">${other.map(opt).join("")}</optgroup>` : ""));
 }
-["chatModel", "chatEmbed"].forEach(id => { $(id).onchange = () => { store.set(id, $(id).value); paintDocs(); }; });
+["chatModel", "chatEmbed", "chatOcr"].forEach(id => { $(id).onchange = () => { store.set(id, $(id).value); paintDocs(); }; });
 async function loadChatState() {
   try { chatState = await api("/api/chat/state"); } catch (e) { return; }
   fillChatModels(); paintDocs();
@@ -1173,26 +1228,40 @@ async function loadChatState() {
 }
 function paintDocs() {
   const s = chatState; if (!s) return;
-  const ix = s.indexing, embed = $("chatEmbed").value, stale = s.files.filter(f => !f.indexed).length;
+  const ix = s.indexing, stale = s.files.filter(f => !f.indexed).length, em = models.find(m => m.id === $("chatEmbed").value);
+  const ready = !!em && em.type === "embeddings", embed = ready ? em.id : "";
+  $("embedWarn").hidden = !em || ready;
+  if (em && !ready) $("embedWarn").innerHTML = `<b>${t("embedWarnT")}</b>${esc(t("embedWarn", em.id))}`;
   $("docsDir").innerText = t("docsDir", s.docs_dir, s.exts.join(" "));
   $("docsBarWrap").hidden = !ix.running;
   $("docsBar").style.width = (ix.total ? ix.done / ix.total * 100 : 0) + "%";
   $("docsIndex").disabled = ix.running || !embed || !s.files.length || !!jobId;
+  $("docsCancel").hidden = !ix.running; $("docsCancel").disabled = !!ix.cancel;
+  $("chatOcr").disabled = $("chatEmbed").disabled = !!ix.running;
+  // 3 ô bước: 1 tiếp nhận · 2 lấy chữ (hoặc OCR) · 3–5 vector hóa và lưu
+  const at = ["scan", "read", "ocr", "embed"].indexOf(ix.stage), cur = at < 0 ? -1 : at === 0 ? 0 : at === 3 ? 2 : 1;
+  $("docsSteps").hidden = !ix.running;
+  $("docsSteps").innerHTML = ["stepScan", at === 2 ? "stepOcr" : "stepRead", "stepEmbed"]
+    .map((l, n) => `<span class="${n === cur ? "on" : n < cur ? "ok" : ""}">${n < cur ? "✓ " : ""}${t(l)}</span>`).join("");
+  const missing = s.files.filter(f => f.ocr_missing).length;
   const st = $("docsStatus"); st.className = "help";
-  if (ix.running) st.textContent = t("docsIndexing", ix.done, ix.total, ix.file);
+  if (ix.running) st.textContent = ix.cancel ? t("stCancel") : ix.stage === "scan" ? t("stScan")
+    : t({read: "stRead", ocr: "stOcr", embed: "stEmbed"}[ix.stage] || "stRead", ix.done, ix.total, ix.file);
   else if (ix.error) { st.textContent = tr(ix.error); st.className = "help err"; }
   else if (!s.files.length) st.textContent = t("docsNone");
-  else if (!embed) st.textContent = t("docsNoEmbed");
+  else if (!embed) st.textContent = em ? "" : t("docsNoEmbed");
   else if (!s.chunks) st.textContent = t("docsNoIndex");
   else if (s.embed_model !== embed) st.textContent = t("docsOtherModel", s.embed_model);
   else if (stale) st.textContent = t("docsStale", stale);
+  else if (missing) { st.textContent = t("docsOcrMissing", missing); st.className = "help err"; }
   else st.textContent = t("docsReady", s.files.length, s.chunks, s.embed_model);
   let dir = null, html = "";
   for (const f of s.files) {
     const cut = f.path.lastIndexOf("/"), d = cut < 0 ? "" : f.path.slice(0, cut), depth = d ? d.split("/").length : 0;
     if (d !== dir) { dir = d; if (d) html += `<div class="dir" style="padding-left:${(depth - 1) * 12}px">📁 ${esc(d)}</div>`; }
-    const bad = f.note, cls = bad ? "bad" : f.indexed ? "ok" : "new";
-    const tip = bad ? (f.note === "empty" ? t("fEmpty") : f.note) : f.indexed ? t("fIndexed", f.chunks) : t("fNew");
+    const bad = f.note || (f.indexed && f.ocr_missing), cls = bad ? "bad" : f.indexed ? "ok" : "new";
+    const tip = f.ocr_missing && f.indexed ? t("fOcrMissing", f.ocr_missing) : f.note ? (f.note === "empty" ? t("fEmpty") : f.note)
+      : f.indexed ? t("fIndexed", f.chunks) + (f.ocr_pages ? t("fOcr", f.ocr_pages) : "") : t("fNew");
     html += `<div class="f" style="padding-left:${depth * 12}px" data-path="${esc(f.path)}" title="${esc(tip)}"><span class="${cls}">${bad ? "⚠" : f.indexed ? "✓" : "●"}</span><span class="n">${esc(f.path.slice(cut + 1))}</span><span class="muted">${f.kb} KB</span></div>`;
   }
   $("docsTree").innerHTML = html;
@@ -1201,10 +1270,11 @@ const openDoc = path => api("/api/chat/open", {method: "POST", headers: {"Conten
 $("docsOpen").onclick = () => openDoc("");
 $("docsTree").onclick = e => { const f = e.target.closest(".f"); if (f) openDoc(f.dataset.path); };
 $("docsIndex").onclick = async () => {
-  try { await api("/api/chat/index", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({embed_model: $("chatEmbed").value})}); }
+  try { await api("/api/chat/index", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({embed_model: $("chatEmbed").value, ocr_model: $("chatOcr").value})}); }
   catch (e) { alert(e.message); }
   loadChatState();
 };
+$("docsCancel").onclick = async () => { $("docsCancel").disabled = true; try { await api("/api/chat/index/cancel", {method: "POST"}); } catch (e) {} loadChatState(); };
 let unloading = false;
 function paintLoaded() {
   const on = models.filter(m => m.state === "loaded"), g = lastGpu;
@@ -1325,7 +1395,7 @@ function paintChat() {
     return `<div class="msg bot">${body}${meta ? `<div class="meta">${meta}</div>` : ""}</div>`;
   }).join("") : `<div class="muted">${t("chatEmpty")}</div>`;
   if (atEnd) log.scrollTop = log.scrollHeight;
-  $("chatSend").disabled = chatBusy || !lmUp || !!jobId;
+  $("chatSend").disabled = chatBusy || !lmUp || !!jobId || !!(chatState && chatState.indexing.running);
   $("chatInput").placeholder = t("chatPlaceholder");
 }
 // Khung xem nguồn: hiện cả tài liệu, tô sáng đoạn được trích dẫn và các dòng trùng với câu trả lời.
@@ -1363,7 +1433,7 @@ async function openSource(mi, n) {
     const hits = new Map(m.sources.filter(s => s.kind === "doc" && s.doc === x.doc && (cited.includes(s.n) || s.n === n)).map(s => [s.i, s.n]));
     let prev = null;
     $("viewerBody").innerHTML = d.chunks.map(c => {
-      const key = JSON.stringify(c.loc), head = c.loc && key !== prev ? `<div class="vloc">${esc(locLabel(c))}</div>` : "";
+      const key = JSON.stringify(c.loc), head = c.loc && key !== prev ? `<div class="vloc">${esc(locLabel(c))}${c.ocr ? '<span class="ocr">OCR</span>' : ""}</div>` : "";
       prev = key;
       return head + `<div class="vchunk${hits.has(c.i) ? " hit" : ""}${c.i === x.i ? " main" : ""}" id="vc${c.i}">${hits.has(c.i) ? markLines(c.text, citeText(m, hits.get(c.i))) : esc(c.text)}</div>`;
     }).join("");

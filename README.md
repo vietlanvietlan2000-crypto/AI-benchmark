@@ -134,9 +134,29 @@ nhất là với model nhỏ. Ảnh chụp/scan càng nét thì càng đúng.
 Bấm **Chatbot** trên thanh đầu của giao diện.
 
 1. Bỏ tài liệu vào thư mục `Tai_lieu/`, chia thư mục con tùy ý (ví dụ `Nhan su/`, `San pham/May X5/`).
-   Đọc được: `.pdf` (có lớp chữ), `.docx`, `.xlsx`, `.txt`, `.md`, `.csv`. Thư mục `Tai_lieu/Vi du/` là bộ tài liệu giả lập để thử, xóa đi khi dùng thật.
-2. Chọn model lập chỉ mục (embedding) rồi bấm **Cập nhật chỉ mục**. Lần sau chỉ những file mới hoặc đã sửa mới phải tính lại.
+   Đọc được: `.pdf` (có chữ hoặc bản scan), `.docx`, `.xlsx`, `.txt`, `.md`, `.csv` và file ảnh `.jpg`, `.png`, `.webp`, `.bmp`, `.tif`.
+   Thư mục `Tai_lieu/Vi du/` là bộ tài liệu giả lập để thử, xóa đi khi dùng thật.
+2. Chọn model lập chỉ mục (embedding) và model OCR, rồi bấm **Cập nhật chỉ mục**.
 3. Chọn model trả lời và đặt câu hỏi.
+
+**Lập chỉ mục gồm 5 bước** (giao diện hiện bước đang chạy, có nút **Dừng**):
+
+| Bước | Việc làm |
+|---|---|
+| 1. Tiếp nhận | Quét thư mục; chỉ xử lý file mới hoặc đã sửa (đổi model embedding thì làm lại tất cả) |
+| 2. Lấy chữ | PDF có chữ, Word, Excel, txt/md/csv: đọc thẳng. Trang PDF không có lớp chữ (bản scan) và file ảnh: OCR bằng model thị giác |
+| 3. Cắt đoạn | Chia thành đoạn khoảng 900 ký tự, ghi đoạn nằm ở trang / mục / sheet nào |
+| 4. Vector hóa | Model embedding đổi mỗi đoạn thành vector |
+| 5. Lưu trữ | Ghi vào cơ sở dữ liệu SQLite `rag_index/index.db`, từng tài liệu một |
+
+- **OCR:** dùng model thị giác trong LM Studio, nên chọn model chuyên OCR (ví dụ `chandra-ocr-2`); model thị giác thường (Gemma 4)
+  cũng dùng được. Mỗi trang mất khoảng 5–20 giây, ứng dụng OCR 3 trang cùng lúc. Trong lúc OCR, các model khác được gỡ để nhường VRAM;
+  OCR xong thì gỡ model OCR rồi mới nạp model embedding.
+- **Kết quả OCR được lưu lại** theo nội dung file: đổi model embedding hay lập lại chỉ mục không phải OCR lại.
+  Bấm Dừng giữa chừng thì các trang đã OCR và tài liệu đã lưu vẫn còn, lần sau làm tiếp.
+- Chọn "Không OCR" thì trang scan bị bỏ qua; tài liệu đó hiện dấu ⚠ kèm số trang chưa OCR.
+- Khi đang lập chỉ mục thì không chat và không chạy benchmark được (cùng dùng GPU).
+- OCR vẫn có thể đọc sai (chữ viết tay, bản scan mờ). Trong khung xem nguồn, đoạn lấy từ OCR có nhãn **OCR** để biết mà kiểm tra lại.
 
 Mỗi câu hỏi đi qua hai bước: tìm các đoạn gần câu hỏi nhất để biết **tài liệu nào liên quan** (tên thư mục và tên file cũng được
 tính vào), rồi đưa cho AI **đọc trọn tài liệu đó**; tài liệu dài quá ngữ cảnh thì chỉ đưa các đoạn liên quan kèm đoạn liền kề.
@@ -154,6 +174,8 @@ AI đọc vài trang kết quả đầu và trả lời kèm link nguồn. Mặc
 không phản hồi; khi đó hỏi lại sau ít giây. Có thể bật cùng lúc với tra cứu tài liệu.
 
 Lưu ý:
+- Ô "Model lập chỉ mục" liệt kê mọi model trong LM Studio. Nhóm trên dùng được ngay; model ở nhóm dưới bị LM Studio xếp
+  là model chat, muốn dùng thì trong LM Studio mở My Models → ⚙ của model → "Override Domain Type" → "Embedding".
 - Model embedding quyết định việc tìm đúng tài liệu. Với tiếng Việt nên dùng model đa ngôn ngữ (Qwen3 Embedding, bge-m3); `nomic-embed` yếu hơn.
 - PDF scan (chỉ có ảnh) không đọc được, trong danh sách sẽ hiện dấu ⚠.
 - Khi chatbot tự nạp model, nó nạp model trả lời với ngữ cảnh 16.384 token và model embedding với 4.096 token. Model đã nạp sẵn thì giữ nguyên ngữ cảnh đang có.
@@ -162,7 +184,8 @@ Lưu ý:
 - AI vẫn có thể trả lời sai; tên tài liệu nguồn là để người dùng kiểm tra lại.
 - Bỏ tick "Tra cứu tài liệu" để chat tự do với model. Hội thoại không được lưu lại.
 
-Mã nguồn: `aibench/rag.py` (đọc file, chỉ mục, tìm kiếm), `aibench/chat.py` (API). Chỉ mục lưu ở `rag_index/`.
+Mã nguồn: `aibench/rag.py` (đọc file, OCR, chỉ mục, tìm kiếm), `aibench/chat.py` (API), `aibench/websearch.py` (tìm kiếm internet).
+Chỉ mục và kết quả OCR lưu ở `rag_index/index.db`.
 
 ## Cấu trúc
 

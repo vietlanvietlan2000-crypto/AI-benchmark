@@ -174,6 +174,8 @@ async def get_modules() -> list[dict[str, Any]]:
 async def create_job(body: dict[str, Any]) -> dict[str, Any]:
     if _running():
         raise HTTPException(409, "Đang có một bài test chạy, hãy đợi hoặc huỷ nó trước")
+    if chat.indexing["running"]:  # lập chỉ mục cũng dùng GPU, chạy cùng lúc thì số đo benchmark sai
+        raise HTTPException(409, "Đang lập chỉ mục tài liệu, hãy đợi xong hoặc bấm Dừng")
     mod = modules().get(body.get("module", ""))
     if mod is None:
         raise HTTPException(404, "Không có module này")
