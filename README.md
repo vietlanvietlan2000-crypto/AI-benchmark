@@ -129,6 +129,30 @@ dòng hàng, tổng tiền bằng chữ). Nếu đổi thứ tự cột trong fi
 **Phải kiểm tra lại kết quả.** Chữ in và con dấu đọc khá đúng, nhưng chữ viết tay vẫn sai đáng kể,
 nhất là với model nhỏ. Ảnh chụp/scan càng nét thì càng đúng.
 
+## Chatbot hỏi đáp tài liệu
+
+Bấm **Chatbot** trên thanh đầu của giao diện.
+
+1. Bỏ tài liệu vào thư mục `Tai_lieu/`, chia thư mục con tùy ý (ví dụ `Nhan su/`, `San pham/May X5/`).
+   Đọc được: `.pdf` (có lớp chữ), `.docx`, `.xlsx`, `.txt`, `.md`, `.csv`. Thư mục `Tai_lieu/Vi du/` là bộ tài liệu giả lập để thử, xóa đi khi dùng thật.
+2. Chọn model lập chỉ mục (embedding) rồi bấm **Cập nhật chỉ mục**. Lần sau chỉ những file mới hoặc đã sửa mới phải tính lại.
+3. Chọn model trả lời và đặt câu hỏi.
+
+Mỗi câu hỏi đi qua hai bước: tìm các đoạn gần câu hỏi nhất để biết **tài liệu nào liên quan** (tên thư mục và tên file cũng được
+tính vào), rồi đưa cho AI **đọc trọn tài liệu đó**; tài liệu dài quá ngữ cảnh thì chỉ đưa các đoạn liên quan kèm đoạn liền kề.
+Dưới mỗi câu trả lời có tên tài liệu AI đã đọc, bấm vào để mở file.
+
+Lưu ý:
+- Model embedding quyết định việc tìm đúng tài liệu. Với tiếng Việt nên dùng model đa ngôn ngữ (Qwen3 Embedding, bge-m3); `nomic-embed` yếu hơn.
+- PDF scan (chỉ có ảnh) không đọc được, trong danh sách sẽ hiện dấu ⚠.
+- Khi chatbot tự nạp model, nó nạp model trả lời với ngữ cảnh 16.384 token và model embedding với 4.096 token. Model đã nạp sẵn thì giữ nguyên ngữ cảnh đang có.
+- Nút **Gỡ các model đã nạp** giải phóng VRAM; model cần dùng sẽ tự nạp lại ở câu hỏi kế tiếp. Nên bấm nút này khi model đã được nạp sẵn
+  từ nơi khác với ngữ cảnh lớn (ví dụ Qwen3 Embedding 8B tự nạp với 40.960 token chiếm hơn 10 GB VRAM).
+- AI vẫn có thể trả lời sai; tên tài liệu nguồn là để người dùng kiểm tra lại.
+- Bỏ tick "Tra cứu tài liệu" để chat tự do với model. Hội thoại không được lưu lại.
+
+Mã nguồn: `aibench/rag.py` (đọc file, chỉ mục, tìm kiếm), `aibench/chat.py` (API). Chỉ mục lưu ở `rag_index/`.
+
 ## Cấu trúc
 
 ```

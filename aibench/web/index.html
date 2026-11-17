@@ -185,6 +185,26 @@
   .cp { font-size: 12.5px; color: var(--muted); } .cp b { font-size: 14px; color: var(--text); margin-right: 4px; }
   .cp.good span { color: var(--ok); font-weight: 600; } .cp.bad span { color: var(--bad); font-weight: 600; }
   .cost { margin-top: 4px; font-size: 12.5px; color: var(--warn); font-weight: 600; }
+  /* ----- Chatbot ----- */
+  #chatView { position: relative; z-index: 1; display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 16px; padding: 16px 24px; max-width: 1500px; margin: 0 auto; }
+  @media (max-width: 900px) { #chatView { grid-template-columns: minmax(0, 1fr); padding: 16px; } }
+  .chatcard { display: flex; flex-direction: column; height: calc(100vh - 120px); min-height: 420px; }
+  #chatLog { flex: 1; overflow: auto; padding-right: 4px; }
+  .msg { max-width: 86%; margin: 0 0 12px; padding: 10px 13px; border-radius: 12px; white-space: pre-wrap; word-break: break-word; }
+  .msg.user { margin-left: auto; background: var(--accent); color: var(--accent-text); border-bottom-right-radius: 3px; }
+  .msg.bot { background: var(--field); border: 1px solid var(--line); border-bottom-left-radius: 3px; }
+  .msg .st { color: var(--muted); font-style: italic; }
+  .msg .meta { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line); font-size: 12px; color: var(--muted); white-space: normal; }
+  .src { display: inline-block; margin: 3px 6px 0 0; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--accent); color: var(--accent);
+         background: transparent; font-size: 12px; cursor: pointer; }
+  .chatin { display: flex; gap: 8px; margin-top: 12px; align-items: flex-end; }
+  .chatin textarea { flex: 1; resize: vertical; min-height: 44px; }
+  .tree { margin-top: 10px; font-size: 12.5px; max-height: 38vh; overflow: auto; }
+  .tree .dir { font-weight: 700; margin-top: 6px; }
+  .tree .f { display: flex; gap: 6px; cursor: pointer; padding: 1px 0; }
+  .tree .f:hover { color: var(--accent); }
+  .tree .f .n { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tree .ok { color: var(--ok); } .tree .new { color: var(--warn); } .tree .bad { color: var(--bad); }
   h3 { font-size: 13px; margin: 18px 0 8px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
 </style>
 </head>
@@ -195,6 +215,7 @@
     <img id="logo" src="/logo-mark.png" alt="Tech by Lân" data-full="/logo.png">
     <div><div class="name">Tech by Lân</div><div class="sub"><b>AI Bench</b> · <span data-i18n="tagline"></span></div></div>
   </div>
+  <div class="seg" role="group"><button id="viewBench">Benchmark</button><button id="viewChat">Chatbot</button></div>
   <span class="pill"><span class="dot" id="lmDot"></span><span id="lmText">LM Studio…</span>
     <button id="lmStart" hidden data-i18n="lmStartBtn"></button></span>
   <span class="pill" id="gpuText">GPU…</span>
@@ -247,6 +268,38 @@
   </div>
 </main>
 <section id="compare" hidden></section>
+<section id="chatView" hidden>
+  <div>
+    <div class="card">
+      <h2 data-i18n="chatSetup"></h2>
+      <label for="chatModel" style="margin-top:0" data-i18n="chatModel"></label>
+      <select id="chatModel"></select>
+      <div class="help" id="loadedInfo" style="margin-top:6px"></div>
+      <button id="unloadBtn" style="margin-top:6px;width:100%" data-i18n="unloadBtn"></button>
+      <label class="check"><input type="checkbox" id="chatDocs" checked> <span data-i18n="chatUseDocs"></span></label>
+      <div class="help" data-i18n="chatUseDocsHelp"></div>
+      <label for="chatEmbed" data-i18n="chatEmbed"></label>
+      <select id="chatEmbed"></select>
+      <div class="help" data-i18n="chatEmbedHelp"></div>
+    </div>
+    <div class="card">
+      <h2 data-i18n="docsTitle"></h2>
+      <div class="help" id="docsDir" style="word-break:break-all"></div>
+      <div class="row"><button id="docsOpen" data-i18n="docsOpen"></button><button class="primary" id="docsIndex" data-i18n="docsIndex"></button></div>
+      <div class="bar" id="docsBarWrap" hidden><div id="docsBar"></div></div>
+      <div class="help" id="docsStatus" style="margin-top:8px"></div>
+      <div class="tree" id="docsTree"></div>
+    </div>
+  </div>
+  <div class="card chatcard">
+    <div id="chatLog"></div>
+    <div class="chatin">
+      <textarea id="chatInput" rows="2"></textarea>
+      <button class="primary" id="chatSend" data-i18n="chatSend"></button>
+      <button id="chatNew" data-i18n="chatNew"></button>
+    </div>
+  </div>
+</section>
 <div id="zoom"><img alt=""></div>
 <script>
 const $ = id => document.getElementById(id);
@@ -285,6 +338,25 @@ const T = {
     fitCpu: "Đo thực tế: model này đang nạp và chạy bằng CPU, không dùng GPU.",
     fitCtxTip: max => `Để Context Length trong LM Studio không quá khoảng ${max} token, nếu cao hơn sẽ tràn VRAM.`,
     fitEst: size => `Ước lượng từ dung lượng file model (${size} GB), sai số có thể vài GB.`,
+    unloadBtn: "Gỡ các model đã nạp", unloading: "Đang gỡ model…", loadedNone: "Chưa có model nào nạp trong bộ nhớ.",
+    loadedList: (list, vram) => `Đang nạp: ${list}${vram ? ` · VRAM đang dùng ${vram}` : ""}`,
+    unloadHint: "Model trả lời sẽ tự nạp lại khi bạn gửi câu hỏi.",
+    chatSetup: "Chatbot", chatModel: "Model trả lời", chatUseDocs: "Tra cứu tài liệu trước khi trả lời",
+    chatUseDocsHelp: "Bật: AI chỉ trả lời theo tài liệu trong thư mục bên dưới. Tắt: chat tự do với model.",
+    chatEmbed: "Model lập chỉ mục (embedding)", chatEmbedHelp: "Dùng để tìm tài liệu liên quan. Đổi model này thì phải lập lại chỉ mục.",
+    docsTitle: "Tài liệu", docsOpen: "Mở thư mục", docsIndex: "Cập nhật chỉ mục", chatSend: "Gửi", chatNew: "Cuộc trò chuyện mới",
+    chatPlaceholder: "Nhập câu hỏi… (Enter để gửi, Shift+Enter để xuống dòng)",
+    chatEmpty: "Hãy đặt câu hỏi về tài liệu trong thư mục. AI sẽ tìm tài liệu liên quan, đọc rồi trả lời kèm tên tài liệu nguồn.",
+    docsDir: (d, ext) => `Bỏ tài liệu vào thư mục này, chia thư mục con tùy ý: ${d}\nLoại file đọc được: ${ext}`,
+    docsNone: "Thư mục chưa có tài liệu nào.", docsNoEmbed: "LM Studio chưa có model embedding nào. Hãy tải một model (ví dụ bge-m3) trong LM Studio.",
+    docsIndexing: (a, b, f) => `Đang lập chỉ mục ${a}/${b}: ${f}`,
+    docsReady: (n, c, m) => `Đã lập chỉ mục ${n} tài liệu (${c} đoạn) bằng ${m}.`,
+    docsStale: n => `Có ${n} tài liệu mới hoặc đã sửa chưa được lập chỉ mục. Bấm "Cập nhật chỉ mục".`,
+    docsOtherModel: m => `Chỉ mục hiện tại lập bằng ${m}. Bấm "Cập nhật chỉ mục" để lập lại bằng model đang chọn.`,
+    docsNoIndex: "Chưa lập chỉ mục. Bấm \"Cập nhật chỉ mục\" để bắt đầu.",
+    fIndexed: n => `đã lập chỉ mục (${n} đoạn)`, fNew: "mới hoặc đã sửa, chưa lập chỉ mục", fEmpty: "không đọc được chữ (có thể là bản scan)",
+    srcLabel: "Tài liệu đã đọc:", srcFull: "cả tài liệu", srcPart: "trích đoạn", srcNone: "Không tìm thấy tài liệu liên quan.",
+    chatStats: (s, tps, ctx) => `${s} giây · ${tps} token/giây · ngữ cảnh ${ctx} token`,
     mdirLabel: "Thư mục model của LM Studio", mdirOther: "Thư mục khác…", mdirDefault: "mặc định",
     mdirOpt: (n, free) => `${n} model · ổ còn trống ${free} GB`,
     mdirHelp: "LM Studio chỉ đọc model trong một thư mục. Đổi thư mục ở đây để chọn model nằm ở nơi khác.",
@@ -343,6 +415,25 @@ const T = {
     fitCpu: "Measured: this model is loaded and running on CPU, not the GPU.",
     fitCtxTip: max => `Keep Context Length in LM Studio at or below about ${max} tokens; higher will overflow VRAM.`,
     fitEst: size => `Estimated from the model file size (${size} GB); may be off by a few GB.`,
+    unloadBtn: "Unload loaded models", unloading: "Unloading models…", loadedNone: "No model is loaded in memory.",
+    loadedList: (list, vram) => `Loaded: ${list}${vram ? ` · VRAM in use ${vram}` : ""}`,
+    unloadHint: "The answering model loads again automatically when you send a question.",
+    chatSetup: "Chatbot", chatModel: "Answering model", chatUseDocs: "Look up documents before answering",
+    chatUseDocsHelp: "On: the AI answers only from the documents in the folder below. Off: free chat with the model.",
+    chatEmbed: "Indexing (embedding) model", chatEmbedHelp: "Used to find the relevant documents. Changing it requires re-indexing.",
+    docsTitle: "Documents", docsOpen: "Open folder", docsIndex: "Update index", chatSend: "Send", chatNew: "New conversation",
+    chatPlaceholder: "Type a question… (Enter to send, Shift+Enter for a new line)",
+    chatEmpty: "Ask about the documents in the folder. The AI finds the relevant documents, reads them and answers with the source names.",
+    docsDir: (d, ext) => `Put documents in this folder, with any subfolders you like: ${d}\nReadable file types: ${ext}`,
+    docsNone: "The folder has no documents yet.", docsNoEmbed: "LM Studio has no embedding model. Download one (e.g. bge-m3) in LM Studio.",
+    docsIndexing: (a, b, f) => `Indexing ${a}/${b}: ${f}`,
+    docsReady: (n, c, m) => `${n} documents indexed (${c} passages) with ${m}.`,
+    docsStale: n => `${n} new or edited document(s) are not indexed yet. Click "Update index".`,
+    docsOtherModel: m => `The current index was built with ${m}. Click "Update index" to rebuild it with the selected model.`,
+    docsNoIndex: "No index yet. Click \"Update index\" to start.",
+    fIndexed: n => `indexed (${n} passages)`, fNew: "new or edited, not indexed yet", fEmpty: "no readable text (possibly a scan)",
+    srcLabel: "Documents read:", srcFull: "whole document", srcPart: "excerpts", srcNone: "No relevant document found.",
+    chatStats: (s, tps, ctx) => `${s} s · ${tps} tokens/s · context ${ctx} tokens`,
     mdirLabel: "LM Studio model folder", mdirOther: "Another folder…", mdirDefault: "default",
     mdirOpt: (n, free) => `${n} model${n === 1 ? "" : "s"} · ${free} GB free`,
     mdirHelp: "LM Studio reads models from one folder only. Switch it here to pick models stored elsewhere.",
@@ -378,6 +469,9 @@ const t = (k, ...a) => { const v = T[lang][k]; return typeof v === "function" ? 
 // ----- Chữ do server/module trả về (tiếng Việt) → tiếng Anh. Dịch ở giao diện nên kết quả cũ trong lịch sử cũng đổi được. -----
 // Thêm module mới: bổ sung các chuỗi tiếng Việt của module vào đây; chuỗi chưa có sẽ hiện nguyên tiếng Việt.
 const D = {
+  "Đang nạp model…": "Loading the model…", "Đang tìm tài liệu liên quan…": "Finding relevant documents…", "Model đang suy nghĩ…": "The model is thinking…",
+  "Chưa có chỉ mục tài liệu. Hãy bấm \"Cập nhật chỉ mục\" trước.": "There is no document index yet. Click \"Update index\" first.",
+  "Chưa chọn model embedding": "No embedding model selected", "Thiếu model hoặc câu hỏi": "Model or question missing",
   // tên + mô tả module
   "Benchmark GPU (LLM)": "GPU Benchmark (LLM)",
   "Đo tốc độ sinh token, độ trễ, tốc độ đọc prompt, thông lượng song song, VRAM, nhiệt độ và công suất của GPU.":
@@ -567,6 +661,7 @@ async function refreshStatus() {
   $("run").disabled = !lmUp || !!jobId;
   $("module").disabled = !!jobId;  // đang chạy thì không cho đổi bài test
   paintDirs();
+  if (view === "chat") { fillChatModels(); paintChat(); if (!chatState || !chatState.indexing.running) loadChatState(); }
   syncQuick();
 }
 // Dòng trạng thái trên thanh đầu (tách riêng để đổi ngôn ngữ là vẽ lại được ngay).
@@ -903,7 +998,7 @@ function applyLang() {
   document.querySelectorAll("[data-i18n]").forEach(el => { el.textContent = t(el.dataset.i18n); });
   $("langVi").classList.toggle("on", lang === "vi"); $("langEn").classList.toggle("on", lang === "en");
   $("logo").title = t("logoTip");
-  paintTools(); paintStatus(); paintDirs();
+  paintTools(); paintStatus(); paintDirs(); paintChat(); paintDocs();
   if (mods.length) {
     const keep = formParams();  // giữ lại những gì người dùng đã nhập
     fillModules(); renderForm();
@@ -1000,7 +1095,143 @@ const fx = (() => {
 })();
 $("fxBtn").onclick = () => { fx.toggle(); paintTools(); };
 
+// ----- Chatbot hỏi đáp tài liệu -----
+let view = "bench", chatMsgs = [], chatBusy = false, chatState = null, chatTimer = null;
+function setView(v) {
+  view = v; store.set("view", v);
+  $("viewBench").classList.toggle("on", v === "bench"); $("viewChat").classList.toggle("on", v === "chat");
+  $("chatView").hidden = v !== "chat";
+  document.querySelector("main").hidden = v === "chat" || cmpOpen;
+  $("compare").hidden = v === "chat" || !cmpOpen;
+  if (v === "chat") { fillChatModels(); loadChatState(); }
+}
+$("viewBench").onclick = () => setView("bench");
+$("viewChat").onclick = () => setView("chat");
+function fillChatModels() {
+  const fill = (id, list, pick) => {
+    const el = $(id); if (document.activeElement === el) return;
+    const cur = el.value || store.get(id) || pick(list) || "";
+    el.innerHTML = list.map(m => `<option value="${esc(m.id)}">${esc(m.id)}${m.quantization ? ` (${esc(m.quantization)})` : ""}${m.state === "loaded" ? t("loaded") : ""}</option>`).join("");
+    if (list.some(m => m.id === cur)) el.value = cur;
+  };
+  fill("chatModel", models.filter(m => m.type !== "embeddings"), l => (l.find(m => m.state === "loaded") || {}).id);
+  fill("chatEmbed", models.filter(m => m.type === "embeddings"),
+       l => (chatState && chatState.embed_model) || (l.find(m => /qwen3-embedding|bge-m3|e5/i.test(m.id)) || {}).id);
+}
+["chatModel", "chatEmbed"].forEach(id => { $(id).onchange = () => { store.set(id, $(id).value); paintDocs(); }; });
+async function loadChatState() {
+  try { chatState = await api("/api/chat/state"); } catch (e) { return; }
+  fillChatModels(); paintDocs();
+  clearTimeout(chatTimer);
+  if (chatState.indexing.running) chatTimer = setTimeout(loadChatState, 700);
+}
+function paintDocs() {
+  const s = chatState; if (!s) return;
+  const ix = s.indexing, embed = $("chatEmbed").value, stale = s.files.filter(f => !f.indexed).length;
+  $("docsDir").innerText = t("docsDir", s.docs_dir, s.exts.join(" "));
+  $("docsBarWrap").hidden = !ix.running;
+  $("docsBar").style.width = (ix.total ? ix.done / ix.total * 100 : 0) + "%";
+  $("docsIndex").disabled = ix.running || !embed || !s.files.length || !!jobId;
+  const st = $("docsStatus"); st.className = "help";
+  if (ix.running) st.textContent = t("docsIndexing", ix.done, ix.total, ix.file);
+  else if (ix.error) { st.textContent = tr(ix.error); st.className = "help err"; }
+  else if (!s.files.length) st.textContent = t("docsNone");
+  else if (!embed) st.textContent = t("docsNoEmbed");
+  else if (!s.chunks) st.textContent = t("docsNoIndex");
+  else if (s.embed_model !== embed) st.textContent = t("docsOtherModel", s.embed_model);
+  else if (stale) st.textContent = t("docsStale", stale);
+  else st.textContent = t("docsReady", s.files.length, s.chunks, s.embed_model);
+  let dir = null, html = "";
+  for (const f of s.files) {
+    const cut = f.path.lastIndexOf("/"), d = cut < 0 ? "" : f.path.slice(0, cut), depth = d ? d.split("/").length : 0;
+    if (d !== dir) { dir = d; if (d) html += `<div class="dir" style="padding-left:${(depth - 1) * 12}px">📁 ${esc(d)}</div>`; }
+    const bad = f.note, cls = bad ? "bad" : f.indexed ? "ok" : "new";
+    const tip = bad ? (f.note === "empty" ? t("fEmpty") : f.note) : f.indexed ? t("fIndexed", f.chunks) : t("fNew");
+    html += `<div class="f" style="padding-left:${depth * 12}px" data-path="${esc(f.path)}" title="${esc(tip)}"><span class="${cls}">${bad ? "⚠" : f.indexed ? "✓" : "●"}</span><span class="n">${esc(f.path.slice(cut + 1))}</span><span class="muted">${f.kb} KB</span></div>`;
+  }
+  $("docsTree").innerHTML = html;
+}
+const openDoc = path => api("/api/chat/open", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({path})}).catch(e => alert(e.message));
+$("docsOpen").onclick = () => openDoc("");
+$("docsTree").onclick = e => { const f = e.target.closest(".f"); if (f) openDoc(f.dataset.path); };
+$("docsIndex").onclick = async () => {
+  try { await api("/api/chat/index", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({embed_model: $("chatEmbed").value})}); }
+  catch (e) { alert(e.message); }
+  loadChatState();
+};
+let unloading = false;
+function paintLoaded() {
+  const on = models.filter(m => m.state === "loaded"), g = lastGpu;
+  const vram = g && g.vram_total_mb ? `${gb(g.vram_used_mb)} / ${gb(g.vram_total_mb)} GB` : "";
+  $("loadedInfo").textContent = unloading ? t("unloading")
+    : on.length ? t("loadedList", on.map(m => m.id.split("/").pop() + (m.size_bytes ? ` (${gb(m.size_bytes / 1048576)} GB)` : "")).join(", "), vram) + " " + t("unloadHint")
+    : t("loadedNone");
+  $("unloadBtn").disabled = unloading || chatBusy || !on.length || !!jobId || !lmUp;
+}
+$("unloadBtn").onclick = async () => {
+  unloading = true; paintLoaded();
+  try { await api("/api/lmstudio/unload", {method: "POST"}); } catch (e) { alert(e.message); }
+  unloading = false; await refreshStatus();
+};
+function paintChat() {
+  paintLoaded();
+  const log = $("chatLog");
+  const rich = s => esc(s).replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>");
+  log.innerHTML = chatMsgs.length ? chatMsgs.map(m => {
+    if (m.role === "user") return `<div class="msg user">${esc(m.content)}</div>`;
+    let meta = "";
+    if (m.sources) meta += m.sources.length
+      ? `${t("srcLabel")} ` + m.sources.map(x => `<button class="src" data-path="${esc(x.doc)}" title="${t(x.mode === "full" ? "srcFull" : "srcPart")}">${esc(x.doc)}</button>`).join("")
+      : (m.docs ? t("srcNone") : "");
+    if (m.stats) meta += `<div>${t("chatStats", fmt(m.stats.seconds), fmt(m.stats.tps), fmt(m.ctx))}</div>`;
+    const body = m.error ? `<span class="err">${esc(tr(m.error))}</span>` : m.content ? rich(m.content) : `<span class="st">${esc(tr(m.status || ""))}</span>`;
+    return `<div class="msg bot">${body}${meta ? `<div class="meta">${meta}</div>` : ""}</div>`;
+  }).join("") : `<div class="muted">${t("chatEmpty")}</div>`;
+  log.scrollTop = log.scrollHeight;
+  $("chatSend").disabled = chatBusy || !lmUp || !!jobId;
+  $("chatInput").placeholder = t("chatPlaceholder");
+}
+$("chatLog").onclick = e => { const b = e.target.closest(".src"); if (b) openDoc(b.dataset.path); };
+async function chatSend() {
+  const text = $("chatInput").value.trim(), model = $("chatModel").value;
+  if (!text || chatBusy || !model) return;
+  const useDocs = $("chatDocs").checked;
+  chatMsgs.push({role: "user", content: text});
+  const bot = {role: "assistant", content: "", status: "", docs: useDocs};
+  const messages = chatMsgs.map(m => ({role: m.role, content: m.content}));
+  chatMsgs.push(bot);
+  $("chatInput").value = ""; chatBusy = true; paintChat();
+  try {
+    const r = await fetch("/api/chat/ask", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({model, messages, use_docs: useDocs})});
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
+    const reader = r.body.getReader(), dec = new TextDecoder();
+    let buf = "";
+    for (;;) {
+      const {done, value} = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, {stream: true});
+      const lines = buf.split("\n"); buf = lines.pop();
+      for (const line of lines) {
+        if (!line) continue;
+        const ev = JSON.parse(line);
+        if (ev.type === "status") bot.status = ev.text;
+        else if (ev.type === "sources") { bot.sources = ev.sources; bot.ctx = ev.ctx; }
+        else if (ev.type === "text") bot.content += ev.text;
+        else if (ev.type === "done") bot.stats = ev;
+        else if (ev.type === "error") bot.error = ev.text;
+      }
+      paintChat();
+    }
+  } catch (e) { bot.error = e.message; }
+  if (!bot.content && !bot.error) bot.error = "Model trả lời rỗng";
+  chatBusy = false; paintChat(); $("chatInput").focus();
+}
+$("chatSend").onclick = chatSend;
+$("chatInput").onkeydown = e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); chatSend(); } };
+$("chatNew").onclick = () => { if (!chatBusy) { chatMsgs = []; paintChat(); } };
+
 applyLang();
+if (store.get("view") === "chat") setView("chat"); else setView("bench");
 (async () => {
   mods = await api("/api/modules");
   fillModules();

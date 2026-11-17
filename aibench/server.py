@@ -16,6 +16,7 @@ from fastapi.responses import FileResponse
 from .core import GPU_INDEX, LM_URL, ROOT, list_results, load_result, modules, run_module
 from .engine import engine_status, ram_total_mb
 from .gpu import gpu_info
+from . import chat
 from . import setup as st
 from .lmstudio import LMStudio
 
@@ -30,6 +31,10 @@ job_images: dict[str, list[dict[str, Any]]] = {}
 
 def _running() -> dict[str, Any] | None:
     return next((j for j in jobs.values() if j["status"] == "running"), None)
+
+
+chat.busy = _running
+app.include_router(chat.router)
 
 
 @app.get("/")
@@ -70,6 +75,18 @@ async def status() -> dict[str, Any]:
 async def start_lmstudio() -> dict[str, Any]:
     try:
         await LMStudio.start_server()
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, str(e)) from e
+    return {"ok": True}
+
+
+@app.post("/api/lmstudio/unload")
+async def unload_models() -> dict[str, Any]:
+    """Gỡ mọi model đang nạp khỏi bộ nhớ để nhường VRAM cho model khác."""
+    if _running():
+        raise HTTPException(409, "Đang có một bài test chạy, hãy đợi hoặc huỷ nó trước")
+    try:
+        await LMStudio.unload_all()
     except Exception as e:  # noqa: BLE001
         raise HTTPException(500, str(e)) from e
     return {"ok": True}

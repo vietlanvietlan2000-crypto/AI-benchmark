@@ -10,3 +10,8 @@ Invoice_Ana/Ket qua/
 # Hóa đơn thật (có tên công ty, mã số thuế) không đưa lên GitHub; chỉ giữ bộ hóa đơn mẫu HoaDon_Mau_*.png
 Invoice_Ana/Raw_invoice/*
 !Invoice_Ana/Raw_invoice/HoaDon_Mau_*.png
+
+# Chatbot: chỉ mục tài liệu là dữ liệu của từng máy; tài liệu thật không đưa lên GitHub, chỉ giữ bộ ví dụ
+rag_index/
+Tai_lieu/*
+!Tai_lieu/Vi du/
