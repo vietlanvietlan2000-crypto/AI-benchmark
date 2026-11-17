@@ -1,7 +1,8 @@
 """Tra cứu tài liệu (RAG) cho chatbot.
 
 Tài liệu đặt trong thư mục Tai_lieu/ (chia thư mục con tùy ý). Cách làm:
-  1. Lập chỉ mục: đọc từng file, cắt thành đoạn, nhờ model embedding của LM Studio đổi mỗi đoạn thành vector.
+  1. Lập chỉ mục: đọc từng file, cắt thành đoạn (ghi lại đoạn nằm ở trang nào / mục nào / sheet nào),
+     nhờ model embedding của LM Studio đổi mỗi đoạn thành vector.
   2. Khi hỏi: tìm các đoạn gần câu hỏi nhất để biết tài liệu nào liên quan (bước "định hướng"),
      rồi đưa cho AI đọc cả tài liệu đó nếu vừa ngữ cảnh, hoặc các đoạn liên quan nếu tài liệu quá dài.
 
@@ -24,51 +25,72 @@ from .core import LM_URL, ROOT
 DOCS = ROOT / "Tai_lieu"
 INDEX = ROOT / "rag_index"
 EXTS = {".txt", ".md", ".csv", ".pdf", ".docx", ".xlsx"}
-CHUNK = 1200  # ký tự mỗi đoạn
+CHUNK = 900  # ký tự mỗi đoạn
+VERSION = 2  # đổi cách cắt đoạn thì tăng số này để chỉ mục cũ bị bỏ
+
+Loc = list | None  # ["page", 3] | ["sheet", "Bảng giá"] | ["sec", "2. Thủ tục xin nghỉ"] | None
 
 
 # ----- đọc file ---------------------------------------------------------------------------------
-def read_doc(path: Path) -> str:
+def _unxml(s: str) -> str:
+    return s.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", '"').replace("&apos;", "'").replace("&amp;", "&")
+
+
+def read_doc(path: Path) -> list[tuple[Loc, str]]:
+    """Các phần của tài liệu kèm vị trí: mỗi trang PDF, mỗi sheet Excel, mỗi mục (theo tiêu đề) của Word/Markdown."""
     ext = path.suffix.lower()
     if ext == ".pdf":
         from pypdf import PdfReader
 
-        return "\n\n".join((pg.extract_text() or "") for pg in PdfReader(str(path)).pages)
+        return [(["page", n], pg.extract_text() or "") for n, pg in enumerate(PdfReader(str(path)).pages, 1)]
     if ext == ".docx":
         with zipfile.ZipFile(path) as z:
             xml = z.read("word/document.xml").decode("utf-8", "replace")
-        paras = re.findall(r"<w:p[ >].*?</w:p>", xml, flags=re.S)
-        lines = ["".join(re.findall(r"<w:t[^>]*>([^<]*)</w:t>", p)) for p in paras]
-        text = "\n".join(x for x in lines if x.strip())
-        return text.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", '"').replace("&apos;", "'")
+        out: list[tuple[Loc, str]] = [(None, "")]
+        for p in re.findall(r"<w:p[ >].*?</w:p>", xml, flags=re.S):
+            text = _unxml("".join(re.findall(r"<w:t[^>]*>([^<]*)</w:t>", p))).strip()
+            if not text:
+                continue
+            # Kiểu tiêu đề: "Heading1" (Word tiếng Anh), "u1" (Word tiếng Việt), "Title"
+            if re.search(r'<w:pStyle w:val="(Heading\d|u\d|Title)"', p) and len(text) < 200:
+                out.append((["sec", text], text))
+            else:
+                out[-1] = (out[-1][0], (out[-1][1] + "\n" + text).strip())
+        return out
     if ext == ".xlsx":
         from openpyxl import load_workbook
 
         wb = load_workbook(path, read_only=True, data_only=True)
         out = []
         for ws in wb.worksheets:
-            out.append(f"[Sheet: {ws.title}]")
-            for row in ws.iter_rows(values_only=True):
-                cells = [str(c) for c in row if c is not None]
-                if cells:
-                    out.append(" | ".join(cells))
-        return "\n".join(out)
+            rows = [" | ".join(str(c) for c in row if c is not None) for row in ws.iter_rows(values_only=True)]
+            out.append((["sheet", ws.title], "\n".join(r for r in rows if r)))
+        return out
     raw = path.read_bytes()
+    text = raw.decode("utf-8", "replace")
     for enc in ("utf-8-sig", "utf-16", "cp1258"):
         try:
-            return raw.decode(enc)
+            text = raw.decode(enc)
+            break
         except UnicodeError:
             continue
-    return raw.decode("utf-8", "replace")
+    out = [(None, "")]
+    for line in text.replace("\r", "").split("\n"):  # tiêu đề Markdown (# ...) mở một mục mới
+        m = re.match(r"#{1,6}\s+(.+)", line)
+        if m:
+            out.append((["sec", m.group(1).strip()], line))
+        else:
+            out[-1] = (out[-1][0], out[-1][1] + "\n" + line)
+    return out
 
 
 def split(text: str) -> list[str]:
-    """Cắt theo đoạn văn, gom lại cho gần CHUNK ký tự. Nối các đoạn lại là ra nguyên văn bản."""
+    """Cắt theo đoạn văn, gom lại cho gần CHUNK ký tự."""
     parts: list[str] = []
-    for para in re.split(r"\n\s*\n|\n(?=#)", text.replace("\r", "")):
+    for para in re.split(r"\n\s*\n", text):
         para = para.strip()
-        while len(para) > CHUNK * 1.5:  # đoạn quá dài (bảng, PDF không xuống dòng) thì cắt ở khoảng trắng
-            cut = para.rfind(" ", 0, CHUNK)
+        while len(para) > CHUNK * 1.5:  # đoạn quá dài (bảng, PDF không xuống dòng) thì cắt ở chỗ xuống dòng / khoảng trắng
+            cut = max(para.rfind("\n", 0, CHUNK), para.rfind(" ", 0, CHUNK))
             cut = cut if cut > CHUNK // 2 else CHUNK
             parts.append(para[:cut])
             para = para[cut:].strip()
@@ -81,6 +103,20 @@ def split(text: str) -> list[str]:
         else:
             out.append(p)
     return out
+
+
+def doc_chunks(path: Path) -> list[dict[str, Any]]:
+    out = []
+    for loc, text in read_doc(path):
+        out += [{"loc": loc, "text": t} for t in split(text)]
+    return out
+
+
+def loc_text(loc: Loc) -> str:
+    """Vị trí viết cho AI đọc (tiếng Việt)."""
+    if not loc:
+        return ""
+    return {"page": "trang", "sheet": "sheet", "sec": "mục"}[loc[0]] + f" {loc[1]}"
 
 
 def list_files() -> list[Path]:
@@ -126,7 +162,7 @@ class Index:
     def __init__(self) -> None:
         self.model = ""
         self.files: dict[str, dict[str, Any]] = {}  # rel -> {mtime, size, n, note}
-        self.chunks: list[dict[str, Any]] = []  # {doc, i, text}
+        self.chunks: list[dict[str, Any]] = []  # {doc, i, loc, text}
         self.vecs = np.zeros((0, 1), dtype=np.float32)
 
     @classmethod
@@ -135,7 +171,7 @@ class Index:
         try:
             meta = json.loads((INDEX / "index.json").read_text(encoding="utf-8"))
             vecs = np.load(INDEX / "vectors.npy")
-            if len(meta["chunks"]) == len(vecs):
+            if meta.get("version") == VERSION and len(meta["chunks"]) == len(vecs):
                 ix.model, ix.files, ix.chunks, ix.vecs = meta["model"], meta["files"], meta["chunks"], vecs
         except (OSError, ValueError, KeyError):
             pass
@@ -144,8 +180,8 @@ class Index:
     def save(self) -> None:
         INDEX.mkdir(exist_ok=True)
         np.save(INDEX / "vectors.npy", self.vecs)
-        (INDEX / "index.json").write_text(
-            json.dumps({"model": self.model, "files": self.files, "chunks": self.chunks}, ensure_ascii=False), encoding="utf-8")
+        (INDEX / "index.json").write_text(json.dumps(
+            {"version": VERSION, "model": self.model, "files": self.files, "chunks": self.chunks}, ensure_ascii=False), encoding="utf-8")
 
     def stale(self) -> list[str]:
         """Các file mới hoặc đã đổi so với chỉ mục."""
@@ -156,8 +192,8 @@ class Index:
                 out.append(rel(p))
         return out
 
-    def doc_text(self, doc: str) -> str:
-        return "\n\n".join(c["text"] for c in self.chunks if c["doc"] == doc)
+    def of(self, doc: str) -> list[dict[str, Any]]:
+        return [c for c in self.chunks if c["doc"] == doc]
 
 
 async def build(model: str, progress: dict[str, Any]) -> Index:
@@ -182,15 +218,16 @@ async def build(model: str, progress: dict[str, Any]) -> Index:
         else:
             note = ""
             try:
-                parts = split(read_doc(p))
+                parts = await asyncio.to_thread(doc_chunks, p)
                 if not parts:
                     note = "empty"  # không có chữ (thường là PDF scan)
             except Exception as e:  # noqa: BLE001
                 parts, note = [], f"error: {e}"
-            head = r.rsplit(".", 1)[0].replace("/", " > ")  # đường dẫn thư mục giúp tìm đúng tài liệu
-            for b in range(0, len(parts), 16):
-                vecs.append(await embed(model, [f"{head}\n{t}" for t in parts[b:b + 16]]))
-            new.chunks += [{"doc": r, "i": i, "text": t} for i, t in enumerate(parts)]
+            head = r.rsplit(".", 1)[0].replace("/", " > ")  # đường dẫn thư mục và tên mục giúp tìm đúng tài liệu
+            texts = [f"{head}{' > ' + str(c['loc'][1]) if c['loc'] and c['loc'][0] == 'sec' else ''}\n{c['text']}" for c in parts]
+            for b in range(0, len(texts), 16):
+                vecs.append(await embed(model, texts[b:b + 16]))
+            new.chunks += [{"doc": r, "i": i, **c} for i, c in enumerate(parts)]
             new.files[r] = {"mtime": s.st_mtime, "size": s.st_size, "n": len(parts), "note": note}
         progress["done"] += 1
     new.vecs = np.concatenate(vecs) if vecs else np.zeros((0, 1), dtype=np.float32)
@@ -198,20 +235,21 @@ async def build(model: str, progress: dict[str, Any]) -> Index:
     return new
 
 
-# ----- tìm và dựng ngữ cảnh ---------------------------------------------------------------------
-def _words(s: str) -> set[str]:
+# ----- tìm và chọn đoạn cho AI đọc --------------------------------------------------------------
+def words(s: str) -> set[str]:
     return {w for w in re.findall(r"\w+", s.lower()) if len(w) > 1}
 
 
-async def retrieve(ix: Index, query: str, budget: int, top_docs: int = 3) -> tuple[str, list[dict[str, Any]]]:
-    """Trả (ngữ cảnh cho AI đọc, danh sách nguồn). `budget` là số ký tự tối đa của ngữ cảnh."""
+async def retrieve(ix: Index, query: str, budget: int, top_docs: int = 3) -> list[dict[str, Any]]:
+    """Các đoạn cho AI đọc (theo thứ tự tài liệu, rồi thứ tự trong tài liệu). `budget` là tổng số ký tự tối đa.
+    Tài liệu vừa ngữ cảnh thì lấy trọn; tài liệu dài thì lấy đoạn trúng kèm đoạn liền trước/sau."""
     if not ix.chunks:
-        return "", []
+        return []
     q = (await embed(ix.model, [query], query=True))[0]
     score = ix.vecs @ q
-    qw = _words(query)
+    qw = words(query)
     if qw:  # cộng điểm trùng từ khóa: bù cho model embedding yếu tiếng Việt, tên riêng, mã số
-        kw = np.array([len(qw & _words(c["doc"] + " " + c["text"])) / len(qw) for c in ix.chunks], dtype=np.float32)
+        kw = np.array([len(qw & words(c["doc"] + " " + c["text"])) / len(qw) for c in ix.chunks], dtype=np.float32)
         score = score + 0.3 * kw
     best = np.argsort(-score)[:10]
     docs: dict[str, float] = {}
@@ -221,17 +259,16 @@ async def retrieve(ix: Index, query: str, budget: int, top_docs: int = 3) -> tup
     ranked = sorted(docs, key=lambda d: -docs[d])[:top_docs]
     ranked = [d for d in ranked if docs[d] >= docs[ranked[0]] - 0.25]  # bỏ tài liệu kém xa tài liệu đầu
 
-    out, sources, left = [], [], budget
+    out: list[dict[str, Any]] = []
+    left = budget
     for n, d in enumerate(ranked):
-        full = ix.doc_text(d)
+        mine = ix.of(d)
         share = left if n == len(ranked) - 1 else int(left * 0.6)
-        if len(full) <= share:
-            body, mode = full, "full"
-        else:  # tài liệu dài: lấy các đoạn trúng kèm đoạn liền trước/sau, theo đúng thứ tự trong tài liệu
-            mine = [c for c in ix.chunks if c["doc"] == d]
-            hits = [ix.chunks[k]["i"] for k in best if ix.chunks[k]["doc"] == d]
+        if sum(len(c["text"]) for c in mine) <= share:
+            keep = list(range(len(mine)))
+        else:
             want: list[int] = []
-            for i in hits:
+            for i in (ix.chunks[k]["i"] for k in best if ix.chunks[k]["doc"] == d):
                 for j in (i, i - 1, i + 1):
                     if 0 <= j < len(mine) and j not in want:
                         want.append(j)
@@ -241,14 +278,9 @@ async def retrieve(ix: Index, query: str, budget: int, top_docs: int = 3) -> tup
                     break
                 keep.append(j)
                 used += len(mine[j]["text"])
-            if not keep:
-                continue
             keep.sort()
-            body = "\n\n".join(("[...]\n" if a and keep[a - 1] != j - 1 else "") + mine[j]["text"] for a, j in enumerate(keep))
-            mode = "excerpt"
-        out.append(f"=== TÀI LIỆU: {d} ===\n{body}")
-        left -= len(body)
-        sources.append({"doc": d, "mode": mode, "score": round(docs[d], 3)})
+        out += [mine[j] for j in keep]
+        left -= sum(len(mine[j]["text"]) for j in keep)
         if left < 500:
             break
-    return "\n\n".join(out), sources
+    return out

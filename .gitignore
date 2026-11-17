@@ -15,3 +15,7 @@ Invoice_Ana/Raw_invoice/*
 rag_index/
 Tai_lieu/*
 !Tai_lieu/Vi du/
+Tai_lieu/Vi du/*
+!Tai_lieu/Vi du/Nhan su/
+!Tai_lieu/Vi du/San pham/
+!Tai_lieu/Vi du/Ke toan/

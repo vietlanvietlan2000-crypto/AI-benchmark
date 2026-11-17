@@ -142,6 +142,17 @@ Mỗi câu hỏi đi qua hai bước: tìm các đoạn gần câu hỏi nhất 
 tính vào), rồi đưa cho AI **đọc trọn tài liệu đó**; tài liệu dài quá ngữ cảnh thì chỉ đưa các đoạn liên quan kèm đoạn liền kề.
 Dưới mỗi câu trả lời có tên tài liệu AI đã đọc, bấm vào để mở file.
 
+**Trích dẫn nguồn.** Mỗi ý trong câu trả lời có số nguồn dạng `[2]`. Dưới câu trả lời liệt kê từng nguồn kèm vị trí:
+trang (PDF), mục theo tiêu đề (Word, Markdown), sheet (Excel). Bấm vào số hoặc dòng nguồn để mở khung xem tài liệu:
+đoạn được trích dẫn có nền vàng, dòng khớp với câu trả lời được tô đậm hơn. Nút "Mở file gốc" mở file bằng ứng dụng mặc định.
+
+**Bảng, Excel, biểu đồ.** Yêu cầu "lập bảng…" thì AI trả về bảng, dưới bảng có nút **Xuất Excel**. Yêu cầu "vẽ biểu đồ cột / đường / tròn…"
+thì giao diện vẽ biểu đồ, nút **Xuất Excel (kèm biểu đồ)** tạo file có cả số liệu lẫn biểu đồ Excel.
+
+**Tìm kiếm qua internet.** Tick "Tìm kiếm qua internet" thì câu hỏi được gửi tới máy tìm kiếm (thư viện `ddgs`, không cần khóa API),
+AI đọc vài trang kết quả đầu và trả lời kèm link nguồn. Mặc định tắt vì câu hỏi sẽ rời khỏi máy. Nguồn tìm kiếm miễn phí có lúc
+không phản hồi; khi đó hỏi lại sau ít giây. Có thể bật cùng lúc với tra cứu tài liệu.
+
 Lưu ý:
 - Model embedding quyết định việc tìm đúng tài liệu. Với tiếng Việt nên dùng model đa ngôn ngữ (Qwen3 Embedding, bge-m3); `nomic-embed` yếu hơn.
 - PDF scan (chỉ có ảnh) không đọc được, trong danh sách sẽ hiện dấu ⚠.

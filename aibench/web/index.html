@@ -197,6 +197,31 @@
   .msg .meta { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line); font-size: 12px; color: var(--muted); white-space: normal; }
   .src { display: inline-block; margin: 3px 6px 0 0; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--accent); color: var(--accent);
          background: transparent; font-size: 12px; cursor: pointer; }
+  .msg.bot { max-width: 94%; }
+  .cite { display: inline-block; min-width: 18px; margin: 0 1px; padding: 0 5px; border-radius: 999px; border: 1px solid var(--accent); background: var(--soft);
+          color: var(--accent); font-size: 11px; font-weight: 700; line-height: 16px; vertical-align: 2px; cursor: pointer; }
+  .srcrow { display: flex; gap: 6px; align-items: baseline; padding: 2px 0; cursor: pointer; }
+  .srcrow:hover .where { color: var(--accent); text-decoration: underline; }
+  .srcrow .where { word-break: break-word; }
+  .msg table { margin: 8px 0 4px; background: var(--card); border-radius: 6px; white-space: normal; }
+  .msg table td, .msg table th { white-space: normal; }
+  .msg pre { white-space: pre-wrap; max-height: none; }
+  .blockbar { display: flex; gap: 8px; margin: 2px 0 10px; }
+  .blockbar button { padding: 4px 10px; font-size: 12px; }
+  .chartbox { margin: 8px 0 4px; padding: 10px; background: var(--card); border: 1px solid var(--line); border-radius: 8px; white-space: normal; }
+  .chartbox svg { height: auto; background: transparent; }
+  .chartbox .ct { font-weight: 700; text-align: center; margin-bottom: 4px; }
+  #viewer { position: fixed; inset: 0; z-index: 20; background: rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center; padding: 20px; }
+  #viewer .box { background: var(--bg2); border: 1px solid var(--line); border-radius: var(--radius); width: min(900px, 100%); max-height: 100%;
+                 display: flex; flex-direction: column; box-shadow: var(--shadow); }
+  #viewer .vh { display: flex; gap: 10px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+  #viewer .vh b { flex: 1; word-break: break-word; }
+  #viewerBody { overflow: auto; padding: 14px 18px; }
+  .vloc { margin: 14px 0 4px; font-size: 12px; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: .03em; }
+  .vchunk { white-space: pre-wrap; word-break: break-word; padding: 4px 8px; border-left: 3px solid transparent; border-radius: 4px; }
+  .vchunk.hit { border-left-color: var(--warn); background: rgba(250, 204, 21, .16); }
+  .vchunk.hit.main { outline: 2px solid var(--warn); }
+  .vchunk mark { background: rgba(250, 204, 21, .75); color: #131a26; border-radius: 2px; padding: 0 1px; }
   .chatin { display: flex; gap: 8px; margin-top: 12px; align-items: flex-end; }
   .chatin textarea { flex: 1; resize: vertical; min-height: 44px; }
   .tree { margin-top: 10px; font-size: 12.5px; max-height: 38vh; overflow: auto; }
@@ -278,6 +303,8 @@
       <button id="unloadBtn" style="margin-top:6px;width:100%" data-i18n="unloadBtn"></button>
       <label class="check"><input type="checkbox" id="chatDocs" checked> <span data-i18n="chatUseDocs"></span></label>
       <div class="help" data-i18n="chatUseDocsHelp"></div>
+      <label class="check"><input type="checkbox" id="chatWeb"> <span data-i18n="chatUseWeb"></span></label>
+      <div class="help" data-i18n="chatUseWebHelp"></div>
       <label for="chatEmbed" data-i18n="chatEmbed"></label>
       <select id="chatEmbed"></select>
       <div class="help" data-i18n="chatEmbedHelp"></div>
@@ -301,6 +328,10 @@
   </div>
 </section>
 <div id="zoom"><img alt=""></div>
+<div id="viewer" hidden><div class="box">
+  <div class="vh"><b id="viewerTitle"></b><button id="viewerOpen"></button><button id="viewerClose">✕</button></div>
+  <div id="viewerBody"></div>
+</div></div>
 <script>
 const $ = id => document.getElementById(id);
 const store = { get: k => { try { return localStorage.getItem("aibench." + k); } catch (e) { return null; } },
@@ -341,6 +372,12 @@ const T = {
     unloadBtn: "Gỡ các model đã nạp", unloading: "Đang gỡ model…", loadedNone: "Chưa có model nào nạp trong bộ nhớ.",
     loadedList: (list, vram) => `Đang nạp: ${list}${vram ? ` · VRAM đang dùng ${vram}` : ""}`,
     unloadHint: "Model trả lời sẽ tự nạp lại khi bạn gửi câu hỏi.",
+    chatUseWeb: "Tìm kiếm qua internet",
+    chatUseWebHelp: "Bật: câu hỏi của bạn được gửi tới máy tìm kiếm trên internet, AI đọc vài trang kết quả đầu rồi trả lời kèm link nguồn.",
+    srcCited: "Nguồn đã trích dẫn (bấm để xem đoạn được tô sáng):", srcRead: "Nguồn AI đã đọc:",
+    locPage: n => `trang ${n}`, locSheet: n => `sheet ${n}`, locSec: n => `mục ${n}`, locPart: n => `đoạn ${n}`,
+    toExcel: "Xuất Excel", toExcelChart: "Xuất Excel (kèm biểu đồ)", chartDrawing: "Đang vẽ biểu đồ…", chartBad: "Không vẽ được biểu đồ (dữ liệu AI trả về không hợp lệ).",
+    viewOpenFile: "Mở file gốc", viewOpenWeb: "Mở trang web", viewLoading: "Đang mở…",
     chatSetup: "Chatbot", chatModel: "Model trả lời", chatUseDocs: "Tra cứu tài liệu trước khi trả lời",
     chatUseDocsHelp: "Bật: AI chỉ trả lời theo tài liệu trong thư mục bên dưới. Tắt: chat tự do với model.",
     chatEmbed: "Model lập chỉ mục (embedding)", chatEmbedHelp: "Dùng để tìm tài liệu liên quan. Đổi model này thì phải lập lại chỉ mục.",
@@ -418,6 +455,12 @@ const T = {
     unloadBtn: "Unload loaded models", unloading: "Unloading models…", loadedNone: "No model is loaded in memory.",
     loadedList: (list, vram) => `Loaded: ${list}${vram ? ` · VRAM in use ${vram}` : ""}`,
     unloadHint: "The answering model loads again automatically when you send a question.",
+    chatUseWeb: "Search the internet",
+    chatUseWebHelp: "On: your question is sent to an internet search engine; the AI reads the first few result pages and answers with source links.",
+    srcCited: "Cited sources (click to see the highlighted passage):", srcRead: "Sources the AI read:",
+    locPage: n => `page ${n}`, locSheet: n => `sheet ${n}`, locSec: n => `section ${n}`, locPart: n => `passage ${n}`,
+    toExcel: "Export to Excel", toExcelChart: "Export to Excel (with chart)", chartDrawing: "Drawing the chart…", chartBad: "Could not draw the chart (the AI returned invalid data).",
+    viewOpenFile: "Open the original file", viewOpenWeb: "Open the web page", viewLoading: "Opening…",
     chatSetup: "Chatbot", chatModel: "Answering model", chatUseDocs: "Look up documents before answering",
     chatUseDocsHelp: "On: the AI answers only from the documents in the folder below. Off: free chat with the model.",
     chatEmbed: "Indexing (embedding) model", chatEmbedHelp: "Used to find the relevant documents. Changing it requires re-indexing.",
@@ -469,6 +512,9 @@ const t = (k, ...a) => { const v = T[lang][k]; return typeof v === "function" ? 
 // ----- Chữ do server/module trả về (tiếng Việt) → tiếng Anh. Dịch ở giao diện nên kết quả cũ trong lịch sử cũng đổi được. -----
 // Thêm module mới: bổ sung các chuỗi tiếng Việt của module vào đây; chuỗi chưa có sẽ hiện nguyên tiếng Việt.
 const D = {
+  "Đang tìm kiếm trên internet…": "Searching the internet…", "Tài liệu này chưa có trong chỉ mục": "This document is not in the index",
+  "Không tìm được kết quả trên internet (nguồn tìm kiếm không phản hồi). Hãy thử lại sau ít giây.": "No internet results (the search source did not respond). Try again in a few seconds.",
+  "Không có dữ liệu để xuất": "Nothing to export",
   "Đang nạp model…": "Loading the model…", "Đang tìm tài liệu liên quan…": "Finding relevant documents…", "Model đang suy nghĩ…": "The model is thinking…",
   "Chưa có chỉ mục tài liệu. Hãy bấm \"Cập nhật chỉ mục\" trước.": "There is no document index yet. Click \"Update index\" first.",
   "Chưa chọn model embedding": "No embedding model selected", "Thiếu model hoặc câu hỏi": "Model or question missing",
@@ -1173,36 +1219,188 @@ $("unloadBtn").onclick = async () => {
   try { await api("/api/lmstudio/unload", {method: "POST"}); } catch (e) { alert(e.message); }
   unloading = false; await refreshStatus();
 };
+// Vị trí của 1 nguồn: "trang 3", "mục 2. Thủ tục xin nghỉ"...
+const locLabel = x => !x.loc ? t("locPart", x.i + 1) : t({page: "locPage", sheet: "locSheet", sec: "locSec"}[x.loc[0]], x.loc[1]);
+const srcLabel = x => x.kind === "web" ? `🌐 ${x.title || x.url} — ${(() => { try { return new URL(x.url).hostname; } catch (e) { return x.url; } })()}`
+                                      : `📄 ${x.doc} · ${locLabel(x)}`;
+const citedOf = m => { const out = []; (m.content || "").replace(/\[(\d+(?:\s*[,;]\s*\d+)*)\]/g, (_, g) => g.split(/[,;]/).forEach(n => { n = +n; if ((m.sources || []).some(x => x.n === n) && !out.includes(n)) out.push(n); })); return out; };
+
+// Biểu đồ SVG từ khối ```chart của AI: {type, title, labels, series: [{name, data}]}
+function chartSvg(c) {
+  const labels = (c.labels || []).map(String), series = (c.series || []).map(x => ({name: String(x.name || ""), data: (x.data || []).map(Number)}));
+  if (!labels.length || !series.length || series.some(x => x.data.some(v => !isFinite(v)))) throw new Error("bad chart");
+  const col = i => `var(--c${i % 4})`, W = 640, H = 320, cut = (x, n) => x.length > n ? x.slice(0, n - 1) + "…" : x;
+  let g = "";
+  if (c.type === "pie") {
+    const data = series[0].data, sum = data.reduce((a, v) => a + Math.max(v, 0), 0) || 1, cx = 170, cy = 160, r = 120;
+    let a0 = -Math.PI / 2;
+    data.forEach((v, i) => {
+      const a1 = a0 + Math.max(v, 0) / sum * Math.PI * 2, big = a1 - a0 > Math.PI ? 1 : 0;
+      g += data.length === 1 ? `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${col(i)}"/>`
+        : `<path d="M${cx},${cy} L${cx + r * Math.cos(a0)},${cy + r * Math.sin(a0)} A${r},${r} 0 ${big} 1 ${cx + r * Math.cos(a1)},${cy + r * Math.sin(a1)} Z" fill="${col(i)}" opacity="${1 - Math.floor(i / 4) * .3}" stroke="var(--bg2)" stroke-width="1.5"/>`;
+      g += `<rect x="330" y="${40 + i * 24}" width="12" height="12" fill="${col(i)}" opacity="${1 - Math.floor(i / 4) * .3}"/><text x="350" y="${51 + i * 24}" font-size="13" fill="currentColor">${esc(cut(labels[i] || "", 26))}: ${fmt(v)} (${Math.round(v / sum * 100)}%)</text>`;
+      a0 = a1;
+    });
+  } else {
+    const all = series.flatMap(x => x.data), top = Math.max(...all, 0) || 1, mag = Math.pow(10, Math.floor(Math.log10(top))), max = Math.ceil(top / mag) * mag;
+    const L = 64, R = 12, T = 14, B = 62, pw = W - L - R, ph = H - T - B, y = v => T + ph - Math.max(v, 0) / max * ph, n = labels.length, slot = pw / n;
+    for (let k = 0; k <= 4; k++) g += `<line x1="${L}" x2="${W - R}" y1="${y(max * k / 4)}" y2="${y(max * k / 4)}" stroke="var(--line)"/><text x="${L - 6}" y="${y(max * k / 4) + 4}" font-size="11" text-anchor="end" fill="var(--muted)">${fmt(max * k / 4)}</text>`;
+    labels.forEach((lab, i) => { g += `<text x="${L + slot * (i + .5)}" y="${H - B + 16}" font-size="11" text-anchor="middle" fill="currentColor">${esc(cut(lab, Math.max(6, Math.floor(slot / 6.5))))}</text>`; });
+    series.forEach((x, si) => {
+      if (c.type === "line") {
+        g += `<polyline fill="none" stroke="${col(si)}" stroke-width="2.5" points="${x.data.map((v, i) => `${L + slot * (i + .5)},${y(v)}`).join(" ")}"/>`;
+        x.data.forEach((v, i) => { g += `<circle cx="${L + slot * (i + .5)}" cy="${y(v)}" r="3.5" fill="${col(si)}"><title>${esc(labels[i])}: ${fmt(v)}</title></circle>`; });
+      } else {
+        const bw = slot * .8 / series.length;
+        x.data.forEach((v, i) => {
+          const bx = L + slot * i + slot * .1 + bw * si;
+          g += `<rect x="${bx}" y="${y(v)}" width="${bw - 2}" height="${T + ph - y(v)}" fill="${col(si)}" rx="2"><title>${esc(labels[i])}: ${fmt(v)}</title></rect>`;
+          if (n * series.length <= 14) g += `<text x="${bx + bw / 2 - 1}" y="${y(v) - 4}" font-size="10" text-anchor="middle" fill="var(--muted)">${fmt(v)}</text>`;
+        });
+      }
+      if (series.length > 1 || x.name) g += `<rect x="${L + si * 150}" y="${H - 18}" width="12" height="12" fill="${col(si)}"/><text x="${L + 18 + si * 150}" y="${H - 8}" font-size="12" fill="currentColor">${esc(cut(x.name, 20))}</text>`;
+    });
+  }
+  return `<svg viewBox="0 0 ${W} ${H}" role="img">${g}</svg>`;
+}
+// Tách câu trả lời thành chữ / bảng / biểu đồ. Bảng và biểu đồ được nhớ lại trong m.blocks để nút "Xuất Excel" dùng.
+function renderAnswer(m, mi) {
+  m.blocks = [];
+  const cite = s => s.replace(/\[(\d+(?:\s*[,;]\s*\d+)*)\]/g, (all, g) => {
+    const ns = g.split(/[,;]/).map(Number);
+    return ns.every(n => (m.sources || []).some(x => x.n === n)) ? ns.map(n => `<button class="cite" data-m="${mi}" data-n="${n}">${n}</button>`).join("") : all;
+  });
+  const inline = s => cite(esc(s).replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>"));
+  const plain = s => s.replace(/\*\*/g, "").replace(/\s*\[\d+(?:\s*[,;]\s*\d+)*\]/g, "").trim();
+  const bar = (label) => `<div class="blockbar"><button data-m="${mi}" data-b="${m.blocks.length - 1}">⬇ ${t(label)}</button></div>`;
+  let html = "";
+  const text = part => {
+    const lines = part.split("\n");
+    for (let i = 0; i < lines.length;) {
+      if (/^\s*\|.*\|\s*$/.test(lines[i]) && i + 1 < lines.length && /^\s*\|[\s:|-]+\|\s*$/.test(lines[i + 1])) {
+        const rows = [];
+        for (; i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i]); i++) {
+          if (rows.length === 1 && /^\s*\|[\s:|-]+\|\s*$/.test(lines[i])) { rows.sep = true; continue; }
+          rows.push(lines[i].trim().slice(1, -1).split("|").map(c => c.trim()));
+        }
+        m.blocks.push({rows: rows.map(r => r.map(plain))});
+        html += `<div class="scroll"><table><tr>${rows[0].map(c => `<th>${inline(c)}</th>`).join("")}</tr>${rows.slice(1).map(r => `<tr>${r.map(c => `<td>${inline(c)}</td>`).join("")}</tr>`).join("")}</table></div>` + bar("toExcel");
+      } else {
+        let j = i; while (j < lines.length && !(/^\s*\|.*\|\s*$/.test(lines[j]) && j + 1 < lines.length && /^\s*\|[\s:|-]+\|\s*$/.test(lines[j + 1]))) j++;
+        html += inline(lines.slice(i, j).join("\n")); i = j;
+      }
+    }
+  };
+  const re = /```(\w*)[ \t]*\n?([\s\S]*?)(```|$)/g;
+  let last = 0, mt;
+  while ((mt = re.exec(m.content))) {
+    text(m.content.slice(last, mt.index)); last = re.lastIndex;
+    const [, kind, body, close] = mt;
+    if (kind === "chart" || (kind === "json" && /"series"/.test(body))) {
+      if (!close) { html += `<div class="chartbox muted">${t("chartDrawing")}</div>`; continue; }
+      try {
+        const c = JSON.parse(body); const svg = chartSvg(c);
+        m.blocks.push({chart: c});
+        html += `<div class="chartbox">${c.title ? `<div class="ct">${esc(c.title)}</div>` : ""}${svg}</div>` + bar("toExcelChart");
+      } catch (e) { html += `<div class="chartbox err">${t("chartBad")}</div><pre>${esc(body)}</pre>`; }
+    } else html += `<pre>${esc(body)}</pre>`;
+    if (!close) break;
+  }
+  text(m.content.slice(last));
+  return html.trim();
+}
 function paintChat() {
   paintLoaded();
-  const log = $("chatLog");
-  const rich = s => esc(s).replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>");
-  log.innerHTML = chatMsgs.length ? chatMsgs.map(m => {
+  const log = $("chatLog"), atEnd = log.scrollHeight - log.scrollTop - log.clientHeight < 80;
+  log.innerHTML = chatMsgs.length ? chatMsgs.map((m, mi) => {
     if (m.role === "user") return `<div class="msg user">${esc(m.content)}</div>`;
     let meta = "";
-    if (m.sources) meta += m.sources.length
-      ? `${t("srcLabel")} ` + m.sources.map(x => `<button class="src" data-path="${esc(x.doc)}" title="${t(x.mode === "full" ? "srcFull" : "srcPart")}">${esc(x.doc)}</button>`).join("")
-      : (m.docs ? t("srcNone") : "");
-    if (m.stats) meta += `<div>${t("chatStats", fmt(m.stats.seconds), fmt(m.stats.tps), fmt(m.ctx))}</div>`;
-    const body = m.error ? `<span class="err">${esc(tr(m.error))}</span>` : m.content ? rich(m.content) : `<span class="st">${esc(tr(m.status || ""))}</span>`;
+    if (m.sources && m.sources.length) {
+      const cited = citedOf(m), list = cited.length ? m.sources.filter(x => cited.includes(x.n)) : m.sources;
+      if (m.stats || cited.length) meta += `<div>${t(cited.length ? "srcCited" : "srcRead")}</div>` +
+        list.map(x => `<div class="srcrow" data-m="${mi}" data-n="${x.n}"><span class="cite">${x.n}</span><span class="where">${esc(srcLabel(x))}</span></div>`).join("");
+    } else if (m.sources && m.stats && (m.docs || m.web)) meta += t("srcNone");
+    if (m.stats) meta += `<div style="margin-top:4px">${t("chatStats", fmt(m.stats.seconds), fmt(m.stats.tps), fmt(m.ctx))}</div>`;
+    const body = m.error ? `<span class="err">${esc(tr(m.error))}</span>` : m.content ? renderAnswer(m, mi) : `<span class="st">${esc(tr(m.status || ""))}</span>`;
     return `<div class="msg bot">${body}${meta ? `<div class="meta">${meta}</div>` : ""}</div>`;
   }).join("") : `<div class="muted">${t("chatEmpty")}</div>`;
-  log.scrollTop = log.scrollHeight;
+  if (atEnd) log.scrollTop = log.scrollHeight;
   $("chatSend").disabled = chatBusy || !lmUp || !!jobId;
   $("chatInput").placeholder = t("chatPlaceholder");
 }
-$("chatLog").onclick = e => { const b = e.target.closest(".src"); if (b) openDoc(b.dataset.path); };
+// Khung xem nguồn: hiện cả tài liệu, tô sáng đoạn được trích dẫn và các dòng trùng với câu trả lời.
+function markLines(text, answer) {
+  const aw = new Set(answer.toLowerCase().match(/[\p{L}\p{N}]+/gu) || []);
+  return text.split("\n").map(line => {
+    const ws = line.toLowerCase().match(/[\p{L}\p{N}]+/gu) || [], lw = new Set(ws);
+    // Tô dòng khi phần lớn dòng nằm trong câu trả lời, hoặc phần lớn câu trả lời nằm trong dòng (câu trả lời ngắn hơn nguyên văn).
+    const inAns = ws.filter(w => aw.has(w)).length / (ws.length || 1), inLine = [...aw].filter(w => lw.has(w)).length / (aw.size || 1);
+    const hit = ws.length >= 4 && !/^\s*#/.test(line) && Math.max(inAns, inLine) >= 0.75;
+    return hit ? `<mark>${esc(line)}</mark>` : esc(line);
+  }).join("\n");
+}
+// Những câu trong câu trả lời có trích dẫn nguồn số n (không có thì lấy cả câu trả lời).
+const citeText = (m, n) => {
+  const parts = (m.content || "").split(/\n|(?<=[.!?])\s+/).filter(x => new RegExp("\\[[\\d,;\\s]*\\b" + n + "\\b[\\d,;\\s]*\\]").test(x));
+  return parts.length ? parts.join(" ") : (m.content || "");
+};
+let viewerSrc = null;
+async function openSource(mi, n) {
+  const m = chatMsgs[mi], x = m && (m.sources || []).find(s => s.n === n);
+  if (!x) return;
+  viewerSrc = x;
+  $("viewer").hidden = false;
+  $("viewerOpen").textContent = t(x.kind === "web" ? "viewOpenWeb" : "viewOpenFile");
+  if (x.kind === "web") {
+    $("viewerTitle").textContent = x.title || x.url;
+    $("viewerBody").innerHTML = `<div class="help" style="word-break:break-all">${esc(x.url)}</div><div class="vchunk hit main" style="margin-top:10px">${markLines(x.text || "", citeText(m, n))}</div>`;
+    return;
+  }
+  $("viewerTitle").textContent = x.doc;
+  $("viewerBody").innerHTML = `<div class="muted">${t("viewLoading")}</div>`;
+  try {
+    const d = await api("/api/chat/doc?path=" + encodeURIComponent(x.doc)), cited = citedOf(m);
+    const hits = new Map(m.sources.filter(s => s.kind === "doc" && s.doc === x.doc && (cited.includes(s.n) || s.n === n)).map(s => [s.i, s.n]));
+    let prev = null;
+    $("viewerBody").innerHTML = d.chunks.map(c => {
+      const key = JSON.stringify(c.loc), head = c.loc && key !== prev ? `<div class="vloc">${esc(locLabel(c))}</div>` : "";
+      prev = key;
+      return head + `<div class="vchunk${hits.has(c.i) ? " hit" : ""}${c.i === x.i ? " main" : ""}" id="vc${c.i}">${hits.has(c.i) ? markLines(c.text, citeText(m, hits.get(c.i))) : esc(c.text)}</div>`;
+    }).join("");
+    const el = $("vc" + x.i); if (el) el.scrollIntoView({block: "center"});
+  } catch (e) { $("viewerBody").innerHTML = `<div class="err">${esc(e.message)}</div>`; }
+}
+$("viewerClose").onclick = () => { $("viewer").hidden = true; };
+$("viewer").onclick = e => { if (e.target === $("viewer")) $("viewer").hidden = true; };
+$("viewerOpen").onclick = () => { if (!viewerSrc) return; if (viewerSrc.kind === "web") window.open(viewerSrc.url, "_blank", "noopener"); else openDoc(viewerSrc.doc); };
+async function exportBlock(mi, bi) {
+  const b = chatMsgs[mi] && chatMsgs[mi].blocks && chatMsgs[mi].blocks[bi];
+  if (!b) return;
+  try {
+    const r = await fetch("/api/chat/excel", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(b)});
+    if (!r.ok) throw new Error(tr((await r.json().catch(() => ({}))).detail || r.statusText));
+    const a = document.createElement("a"), d = new Date(), z = v => String(v).padStart(2, "0");
+    a.href = URL.createObjectURL(await r.blob());
+    a.download = `${b.chart ? "bieu-do" : "bang"}-${d.getFullYear()}${z(d.getMonth() + 1)}${z(d.getDate())}-${z(d.getHours())}${z(d.getMinutes())}${z(d.getSeconds())}.xlsx`;
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  } catch (e) { alert(e.message); }
+}
+$("chatLog").onclick = e => {
+  const c = e.target.closest(".cite, .srcrow"), b = e.target.closest(".blockbar button");
+  if (b) exportBlock(+b.dataset.m, +b.dataset.b);
+  else if (c) { const el = c.closest("[data-n]"); openSource(+el.dataset.m, +el.dataset.n); }
+};
 async function chatSend() {
   const text = $("chatInput").value.trim(), model = $("chatModel").value;
   if (!text || chatBusy || !model) return;
-  const useDocs = $("chatDocs").checked;
+  const useDocs = $("chatDocs").checked, useWeb = $("chatWeb").checked;
   chatMsgs.push({role: "user", content: text});
-  const bot = {role: "assistant", content: "", status: "", docs: useDocs};
+  const bot = {role: "assistant", content: "", status: "", docs: useDocs, web: useWeb};
   const messages = chatMsgs.map(m => ({role: m.role, content: m.content}));
   chatMsgs.push(bot);
   $("chatInput").value = ""; chatBusy = true; paintChat();
   try {
-    const r = await fetch("/api/chat/ask", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({model, messages, use_docs: useDocs})});
+    const r = await fetch("/api/chat/ask", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({model, messages, use_docs: useDocs, use_web: useWeb})});
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
     const reader = r.body.getReader(), dec = new TextDecoder();
     let buf = "";
