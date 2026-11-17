@@ -186,3 +186,7 @@ Kiểu tham số hiện có: `model`, `int`, `bool`, `text`, `textarea`, `select
 Với phân tích ảnh (X-quang): `ctx.lm.chat()` nhận `messages` chuẩn OpenAI nên gửi được ảnh dạng
 `{"type": "image_url", "image_url": {"url": "data:image/png;base64,..."}}` tới model thị giác
 (các model ghi "thị giác" trong danh sách). Việc còn thiếu là thêm kiểu tham số `image` (ô tải ảnh) vào giao diện.
+
+## Giấy phép
+
+Miễn phí theo giấy phép [MIT](LICENSE): ai cũng được dùng, sửa và chia sẻ lại, kể cả cho mục đích thương mại, miễn là giữ dòng ghi bản quyền.
