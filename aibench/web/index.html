@@ -25,7 +25,7 @@
   }
   /* ===== Giao diện TỐI: đen – neon xanh/tím kiểu gaming ===== */
   :root[data-theme=dark] {
-    --bg: #05080f; --bg2: #0b1222; --card: rgba(14,20,34,.8); --field: #0a0f1c; --text: #e6edf7; --muted: #8b98ad;
+    --bg: #05080f; --bg2: #0b1222; --card: rgba(12,18,32,.62); --field: #0a0f1c; --text: #e6edf7; --muted: #8b98ad;
     --line: #1f2b42; --accent: #22d3ee; --accent2: #c084fc; --accent-text: #04121a; --ok: #4ade80; --bad: #f87171; --warn: #fbbf24;
     --soft: #10233a; --head: rgba(8,12,22,.92); --shadow: 0 8px 30px rgba(0,0,0,.5);
     --glow: 0 0 26px rgba(34,211,238,.08);
@@ -49,8 +49,36 @@
   @keyframes float1 { to { transform: translate(16vmax, 10vmax) scale(1.15); } }
   @keyframes float2 { to { transform: translate(-14vmax, -12vmax) scale(1.2); } }
   #fx { position: absolute; inset: 0; width: 100%; height: 100%; }
-  .fx-off .orb { animation: none; }
-  @media (prefers-reduced-motion: reduce) { .orb { animation: none; } }
+  /* Lưới trôi chậm toàn màn hình */
+  .bg { animation: gridDrift 18s linear infinite; }
+  @keyframes gridDrift { to { background-position: 0 44px, 44px 0, 0 0, 0 0; } }
+  /* Sàn lưới phối cảnh kiểu cyberpunk, chạy về phía người xem */
+  .floorwrap { position: absolute; left: 0; right: 0; bottom: 0; height: 42vh; overflow: hidden;
+               perspective: 280px; perspective-origin: 50% 0; }
+  .floor { position: absolute; left: -100%; right: -100%; bottom: 0; height: 300%; transform-origin: 50% 100%;
+           transform: rotateX(75deg);
+           background:
+             linear-gradient(rgba(var(--fx),.55) 2px, transparent 2px) 0 0 / 70px 70px,
+             linear-gradient(90deg, rgba(var(--fx2),.45) 2px, transparent 2px) 0 0 / 70px 70px;
+           -webkit-mask-image: linear-gradient(to bottom, transparent, #000 60%); mask-image: linear-gradient(to bottom, transparent, #000 60%);
+           opacity: .6; animation: floorRun 1.6s linear infinite; }
+  @keyframes floorRun { to { background-position: 0 70px, 0 70px; } }
+  .horizon { position: absolute; left: 0; right: 0; bottom: 42vh; height: 2px; opacity: .7;
+             background: linear-gradient(90deg, transparent, rgba(var(--fx),.9), rgba(var(--fx2),.9), transparent);
+             box-shadow: 0 0 18px 3px rgba(var(--fx),.35); animation: horizonPulse 4s ease-in-out infinite; }
+  @keyframes horizonPulse { 50% { opacity: .3; } }
+  /* Vệt quét sáng chạy từ trên xuống */
+  .scan { position: absolute; left: 0; right: 0; top: -20vh; height: 18vh;
+          background: linear-gradient(to bottom, transparent, rgba(var(--fx),.10) 80%, rgba(var(--fx),.45) 99%, transparent);
+          animation: scanDown 7s cubic-bezier(.45,0,.55,1) infinite; }
+  @keyframes scanDown { to { transform: translateY(140vh); } }
+  /* Vạch quét kiểu màn hình CRT (chỉ giao diện tối) */
+  :root[data-theme=dark] .bg::after { content: ""; position: absolute; inset: 0;
+    background: repeating-linear-gradient(to bottom, rgba(255,255,255,.025) 0 1px, transparent 1px 3px); }
+  :root:not([data-theme=dark]) .floor { opacity: .3; }
+  .fx-off .orb, .fx-off .bg, .fx-off .floor, .fx-off .horizon, .fx-off .scan { animation: none; }
+  .fx-off .scan { display: none; }
+  @media (prefers-reduced-motion: reduce) { .orb, .bg, .floor, .horizon, .scan { animation: none; } .scan { display: none; } }
   header, main { position: relative; z-index: 1; }
 
   header { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; padding: 8px 24px;
@@ -85,7 +113,15 @@
   main { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 16px; padding: 16px 24px; max-width: 1500px; margin: 0 auto; }
   @media (max-width: 900px) { main { grid-template-columns: minmax(0, 1fr); padding: 16px; } header { padding: 8px 16px; } }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; margin-bottom: 16px;
-          box-shadow: var(--shadow), var(--glow); }
+          box-shadow: var(--shadow), var(--glow); position: relative; backdrop-filter: blur(1.5px); }
+  /* Viền neon chạy quanh thẻ (giao diện tối) */
+  :root[data-theme=dark] .card::before { content: ""; position: absolute; inset: -1px; border-radius: inherit; padding: 1px; pointer-events: none;
+    background: linear-gradient(90deg, transparent 20%, rgba(var(--fx),.95), rgba(var(--fx2),.95), transparent 80%) 0 0 / 300% 100%;
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor;
+    mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); opacity: .7; animation: borderFlow 7s linear infinite; }
+  @keyframes borderFlow { to { background-position: 300% 0; } }
+  .fx-off .card::before { animation: none; opacity: .25; }
+  @media (prefers-reduced-motion: reduce) { .card::before { animation: none; } }
   h2 { font-size: 15px; margin: 0 0 12px; }
   :root[data-theme=dark] h2 { color: var(--accent); letter-spacing: .03em; text-transform: uppercase; font-size: 13px; }
   label { display: block; font-weight: 600; margin: 12px 0 4px; }
@@ -146,6 +182,20 @@
   /* ----- So sánh các lần chạy ----- */
   .cmpbar { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin: -4px 0 10px; }
   .cmpbar .muted { margin-right: auto; font-size: 12.5px; }
+  /* Thanh lọc tự xuống dòng theo độ rộng thẻ: ô tìm rộng nhất, các ô chọn chia đều */
+  .hfilter { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; align-items: center; }
+  .hfilter[hidden] { display: none; }
+  .hfilter input, .hfilter select { margin: 0; min-width: 0; width: auto; }
+  .hfilter #hfText { flex: 2 1 240px; }
+  .hfilter select, .hfilter #hfVga { flex: 1 1 160px; }
+  .hfilter button { white-space: nowrap; flex: 0 0 auto; }
+  .pager { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; justify-content: space-between; margin-top: 12px; font-size: 12.5px; }
+  .pager .pages { display: flex; gap: 4px; align-items: center; }
+  .pager button { min-width: 32px; padding: 4px 9px; font-size: 12.5px; }
+  .pager button.cur { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 700; box-shadow: 0 0 12px rgba(var(--fx),.45); }
+  .pager .gap { padding: 0 4px; color: var(--muted); }
+  .pager .psize { display: inline-flex; gap: 6px; align-items: center; margin: 0; color: var(--muted); }
+  .pager select { width: auto; padding: 3px 6px; }
   select:disabled { opacity: .5; cursor: not-allowed; }
   .fit { margin-top: 6px; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--line); border-left: 4px solid var(--muted);
          background: var(--field); font-size: 12.5px; line-height: 1.45; }
@@ -166,8 +216,11 @@
   #compare { position: relative; z-index: 1; padding: 16px 24px; max-width: 1500px; margin: 0 auto; }
   .cmphead { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin-bottom: 10px; }
   .cmphead h2 { margin: 0; font-size: 17px; }
-  table.cmp th, table.cmp td { white-space: normal; vertical-align: top; min-width: 190px; }
-  table.cmp th:first-child, table.cmp td:first-child { min-width: 170px; font-weight: 600; color: var(--text); }
+  /* Cột cố định: cột tiêu chí 180px, các cột kết quả chia đều nhau dù chọn 2, 3, 4 hay 5 lần chạy */
+  table.cmp { table-layout: fixed; }
+  table.cmp th, table.cmp td { white-space: normal; vertical-align: top; overflow-wrap: anywhere; }
+  table.cmp th:first-child, table.cmp td:first-child { font-weight: 600; color: var(--text); }
+  table.cmp th .eng { display: inline-block; max-width: 100%; }
   table.cmp th.base, table.cmp td.base { background: var(--soft); }
   table.cmp th { color: var(--text); font-weight: 400; }
   table.cmp th .hd { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
@@ -239,7 +292,7 @@
 </style>
 </head>
 <body>
-<div class="bg" aria-hidden="true"><div class="orb a"></div><div class="orb b"></div><canvas id="fx"></canvas></div>
+<div class="bg" aria-hidden="true"><div class="orb a"></div><div class="orb b"></div><div class="floorwrap"><div class="floor"></div></div><div class="horizon"></div><div class="scan"></div><canvas id="fx"></canvas></div>
 <header>
   <div class="brand">
     <img id="logo" src="/logo-mark.png" alt="Tech by Lân" data-full="/logo.png">
@@ -293,7 +346,14 @@
       <h2 data-i18n="history"></h2>
       <div class="cmpbar"><span class="muted" data-i18n="cmpHint"></span>
         <button id="cmpClear" hidden data-i18n="cmpClear"></button><button class="primary" id="cmpGo" disabled></button></div>
-      <div class="scroll" id="history"></div>
+      <div class="hfilter" id="histFilter" hidden>
+        <input type="search" id="hfText" data-i18n-ph="hfText">
+        <select id="hfTest"></select>
+        <select id="hfModel"></select>
+        <input type="search" id="hfVga" data-i18n-ph="hfVga" list="hfVgaList"><datalist id="hfVgaList"></datalist>
+        <button id="hfClear" hidden data-i18n="hfClear"></button>
+      </div>
+      <div id="history"></div>
     </div>
   </div>
 </main>
@@ -363,7 +423,9 @@ const T = {
     galleryTitle: "Ảnh và kết quả AI đọc được · bấm vào ảnh để phóng to", answer: "Trả lời", openFile: "Mở file",
     pendingImg: "AI đang xem ảnh này…", expected: "đáp án", aiSaid: "AI trả lời", peak: "cao nhất",
     chartNote: s => `Mỗi đường co theo giá trị cao nhất của nó · trục ngang ${s} giây`, ranFor: s => `chạy ${s} giây`,
-    histEmpty: "Chưa có lần chạy nào.", cols: ["Thời gian", "Bài test", "Model", "GPU", "Kết quả chính"],
+    histEmpty: "Chưa có lần chạy nào.", histShow: (a, b, n) => `Hiển thị ${a}–${b} / ${n} lần chạy`, histPer: "Số dòng mỗi trang",
+    hfText: "🔍 Tìm: model, bài test, GPU, kết quả…", hfVga: "🖥 VGA (vd: 4080)", hfTest: "Tất cả bài test", hfModel: "Tất cả model",
+    hfClear: "✕ Xóa lọc", hfNone: "Không có lần chạy nào khớp bộ lọc.", histShowF: (a, b, n, all) => `Hiển thị ${a}–${b} / ${n} lần chạy khớp (trong ${all})`, cols: ["Thời gian", "Bài test", "Model", "GPU", "Kết quả chính"],
     toDark: "Chuyển sang giao diện tối", toLight: "Chuyển sang giao diện sáng",
     engGpu: e => `⚡ Chạy bằng GPU (${e.backend})`, engSpill: "⚠ GPU bị tràn VRAM", engCpu: "🐢 Chạy bằng CPU",
     engIdle: "Chưa nạp model", engLayers: n => `${n} lớp trên GPU`, engAll: "toàn bộ lớp trên GPU", engCtx: n => `ngữ cảnh ${n}`,
@@ -459,7 +521,9 @@ const T = {
     galleryTitle: "Images and what the AI read · click an image to enlarge", answer: "Answer", openFile: "Open file",
     pendingImg: "The AI is looking at this image…", expected: "expected", aiSaid: "AI answered", peak: "peak",
     chartNote: s => `Each line is scaled to its own peak · horizontal axis spans ${s} s`, ranFor: s => `ran ${s} s`,
-    histEmpty: "No runs yet.", cols: ["Time", "Test", "Model", "GPU", "Key results"],
+    histEmpty: "No runs yet.", histShow: (a, b, n) => `Showing ${a}–${b} of ${n} runs`, histPer: "Rows per page",
+    hfText: "🔍 Search: model, test, GPU, results…", hfVga: "🖥 GPU (e.g. 4080)", hfTest: "All tests", hfModel: "All models",
+    hfClear: "✕ Clear filters", hfNone: "No runs match the filters.", histShowF: (a, b, n, all) => `Showing ${a}–${b} of ${n} matching runs (out of ${all})`, cols: ["Time", "Test", "Model", "GPU", "Key results"],
     toDark: "Switch to dark theme", toLight: "Switch to light theme",
     engGpu: e => `⚡ Running on GPU (${e.backend})`, engSpill: "⚠ GPU out of VRAM", engCpu: "🐢 Running on CPU",
     engIdle: "No model loaded", engLayers: n => `${n} layers on GPU`, engAll: "all layers on GPU", engCtx: n => `context ${n}`,
@@ -876,7 +940,7 @@ async function poll() {
   if (job.images_ver) await showLive(job).catch(() => {});
   if (job.status === "running") { setTimeout(poll, 700); return; }
   jobId = null; imagesVer = 0; $("cancel").hidden = true; $("liveCard").hidden = true; $("live").innerHTML = "";
-  await refreshStatus(); await loadHistory();
+  await refreshStatus(); histPage = 1; await loadHistory();  // lần chạy mới nằm ở trang đầu
   if (job.result_id) showResult(job.result_id);
 }
 
@@ -923,14 +987,74 @@ async function showResult(id) {
   $("result").className = ""; $("result").innerHTML = h;
 }
 
+// Lịch sử có phân trang: danh sách tải 1 lần, chỉ vẽ trang đang xem. Ô tick so sánh giữ nguyên khi chuyển trang.
+let histList = [], histPage = 1;
+let histSize = (v => [10, 20, 50].includes(+v) ? +v : 10)(store.get("histSize"));
 async function loadHistory() {
-  const list = await api("/api/results");
-  if (!list.length) { $("history").innerHTML = `<span class="muted">${t("histEmpty")}</span>`; return; }
-  $("history").innerHTML = `<table><tr><th></th>${t("cols").map(c => `<th>${c}</th>`).join("")}</tr>` +
-    list.map(r => `<tr class="click ${r.id === selected ? "sel" : ""}" data-id="${esc(r.id)}">
+  histList = await api("/api/results");
+  fillHistFilter();
+  renderHistory();
+}
+// ----- Bộ lọc lịch sử: bài test, model, VGA và ô tìm tự do (không phân biệt hoa thường, dấu) -----
+const fold = s => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/đ/g, "d").replace(/Đ/g, "D").toLowerCase();
+function fillHistFilter() {
+  $("histFilter").hidden = !histList.length;
+  const uniq = key => [...new Set(histList.map(key).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  const fillSel = (id, all, items) => {
+    const el = $(id), cur = el.value;
+    el.innerHTML = `<option value="">${esc(t(all))}</option>` + items.map(([v, l]) => `<option value="${esc(v)}">${esc(l)}</option>`).join("");
+    el.value = items.some(([v]) => v === cur) ? cur : "";
+  };
+  const tests = new Map(histList.map(r => [r.module || r.module_name, tr(r.module_name)]));
+  fillSel("hfTest", "hfTest", [...tests].sort((a, b) => a[1].localeCompare(b[1])));
+  fillSel("hfModel", "hfModel", uniq(r => r.model).map(m => [m, m]));
+  $("hfVgaList").innerHTML = uniq(r => r.gpu).map(g => `<option value="${esc(g)}">`).join("");
+}
+function histFiltered() {
+  const test = $("hfTest").value, model = $("hfModel").value, vga = fold($("hfVga").value).trim();
+  const words = fold($("hfText").value).split(/\s+/).filter(Boolean);
+  $("hfClear").hidden = !(test || model || vga || words.length);
+  return histList.filter(r => {
+    if (test && (r.module || r.module_name) !== test) return false;
+    if (model && r.model !== model) return false;
+    if (vga && !fold(r.gpu).includes(vga)) return false;
+    if (!words.length) return true;
+    const hay = fold([r.started_at, r.module_name, tr(r.module_name), r.model, r.quant, r.gpu,
+      ...(r.summary || []).map(s => `${s.label} ${tr(s.label)} ${s.value} ${s.unit || ""}`)].join(" "));
+    return words.every(w => hay.includes(w));  // mọi từ đều phải có
+  });
+}
+["hfText", "hfVga"].forEach(id => $(id).addEventListener("input", () => { histPage = 1; renderHistory(); }));
+["hfTest", "hfModel"].forEach(id => $(id).addEventListener("change", () => { histPage = 1; renderHistory(); }));
+$("hfClear").onclick = () => {
+  ["hfText", "hfVga", "hfTest", "hfModel"].forEach(id => { $(id).value = ""; });
+  histPage = 1; renderHistory();
+};
+function pagerHtml(page, pages, total, all) {
+  const from = (page - 1) * histSize + 1, to = Math.min(total, page * histSize);
+  const info = total < all ? t("histShowF", from, to, total, all) : t("histShow", from, to, total);
+  // Số trang: luôn có trang đầu, cuối và 2 trang quanh trang hiện tại; chỗ trống thay bằng "…"
+  const nums = [];
+  for (let p = 1; p <= pages; p++)
+    if (p === 1 || p === pages || Math.abs(p - page) <= 1) nums.push(p);
+    else if (nums[nums.length - 1] !== "…") nums.push("…");
+  const btn = (p, label, dis, cur) => `<button data-page="${p}"${dis ? " disabled" : ""}${cur ? ' class="cur" aria-current="page"' : ""}>${label}</button>`;
+  return `<div class="pager"><span class="muted">${info}</span>
+    <span class="pages">${btn(page - 1, "‹", page <= 1)}${nums.map(p => p === "…" ? '<span class="gap">…</span>' : btn(p, p, false, p === page)).join("")}${btn(page + 1, "›", page >= pages)}</span>
+    <label class="psize">${t("histPer")} <select id="histSize">${[10, 20, 50].map(n => `<option${n === histSize ? " selected" : ""}>${n}</option>`).join("")}</select></label></div>`;
+}
+function renderHistory() {
+  if (!histList.length) { $("history").innerHTML = `<span class="muted">${t("histEmpty")}</span>`; return; }
+  const list = histFiltered();
+  if (!list.length) { $("history").innerHTML = `<div class="filebox">${t("hfNone")}</div>`; return; }
+  const pages = Math.max(1, Math.ceil(list.length / histSize));
+  histPage = Math.min(Math.max(1, histPage), pages);
+  const rows = list.slice((histPage - 1) * histSize, histPage * histSize);
+  $("history").innerHTML = `<div class="scroll"><table><tr><th></th>${t("cols").map(c => `<th>${c}</th>`).join("")}</tr>` +
+    rows.map(r => `<tr class="click ${r.id === selected ? "sel" : ""}" data-id="${esc(r.id)}">
       <td><label class="pick"><input type="checkbox" data-cmp="${esc(r.id)}"><span class="ord"></span></label></td>
       <td>${esc((r.started_at || "").replace("T", " "))}</td><td>${esc(tr(r.module_name))}</td><td>${modelHtml(r.model, r.quant)}</td><td>${esc(r.gpu || "")}</td>
-      <td>${r.summary.slice(0, 4).map(s => `${esc(tr(s.label))}: <b>${esc(fmt(s.value))}</b> ${esc(tr(s.unit || ""))}`).join(" · ")}</td></tr>`).join("") + `</table>`;
+      <td>${r.summary.slice(0, 4).map(s => `${esc(tr(s.label))}: <b>${esc(fmt(s.value))}</b> ${esc(tr(s.unit || ""))}`).join(" · ")}</td></tr>`).join("") + `</table></div>` + (list.length > 10 || list.length < histList.length ? pagerHtml(histPage, pages, list.length, histList.length) : "");
   document.querySelectorAll("#history tr.click").forEach(tr => tr.onclick = e => { if (!e.target.closest(".pick")) showResult(tr.dataset.id); });
   syncCmp();
 }
@@ -985,7 +1109,15 @@ function syncCmp() {
   $("cmpGo").textContent = t("cmpBtn", cmp.length); $("cmpGo").disabled = cmp.length < 2;
   $("cmpClear").hidden = !cmp.length;
 }
+$("history").addEventListener("click", e => {
+  const b = e.target.closest("button[data-page]");
+  if (b && !b.disabled) { histPage = +b.dataset.page; renderHistory(); }
+});
 $("history").addEventListener("change", e => {
+  if (e.target.id === "histSize") {
+    const first = (histPage - 1) * histSize;  // giữ dòng đầu đang xem khi đổi số dòng mỗi trang
+    histSize = +e.target.value; store.set("histSize", histSize); histPage = Math.floor(first / histSize) + 1; renderHistory(); return;
+  }
   const id = e.target.dataset.cmp;
   if (!id) return;
   if (!e.target.checked) cmp = cmp.filter(x => x !== id);
@@ -1059,7 +1191,8 @@ function renderCompare() {
   const mixed = new Set(runs.map(r => r.module)).size > 1 ? `<div class="filebox">${t("cmpMixed")}</div>` : "";
   $("compare").innerHTML = `<div class="card"><div class="cmphead"><button id="cmpBack">${t("cmpBack")}</button><h2>${t("cmpTitle")}</h2>
     <span class="muted">${t("cmpNote")}</span></div>${mixed}
-    <div class="scroll" style="margin-top:12px"><table class="cmp"><tr><th>${t("cmpCrit")}</th>${head}</tr>${body}</table></div></div>`;
+    <div class="scroll" style="margin-top:12px"><table class="cmp" style="min-width:${180 + runs.length * 210}px">
+    <colgroup><col style="width:180px">${runs.map(() => "<col>").join("")}</colgroup><tr><th>${t("cmpCrit")}</th>${head}</tr>${body}</table></div></div>`;
 }
 $("compare").addEventListener("click", e => {
   const d = e.target.dataset;
@@ -1081,6 +1214,7 @@ function fillModules() {
 function applyLang() {
   document.documentElement.lang = lang;
   document.querySelectorAll("[data-i18n]").forEach(el => { el.textContent = t(el.dataset.i18n); });
+  document.querySelectorAll("[data-i18n-ph]").forEach(el => { el.placeholder = t(el.dataset.i18nPh); });
   $("langVi").classList.toggle("on", lang === "vi"); $("langEn").classList.toggle("on", lang === "en");
   $("logo").title = t("logoTip");
   paintTools(); paintStatus(); paintDirs(); paintChat(); paintDocs();
@@ -1125,7 +1259,7 @@ const fx = (() => {
   const cv = $("fx"), cx = cv.getContext("2d");
   const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
   const LINK = 150;
-  let W = 0, H = 0, nodes = [], packets = [], raf = 0, last = 0, c1 = "", c2 = "";
+  let W = 0, H = 0, nodes = [], packets = [], streams = [], raf = 0, last = 0, c1 = "", c2 = "";
   const self = { on: store.get("fx") !== "0", recolor, toggle };
   function recolor() {
     const cs = getComputedStyle(root);
@@ -1139,10 +1273,29 @@ const fx = (() => {
     nodes = Array.from({length: n}, () => ({x: Math.random() * W, y: Math.random() * H,
       vx: (Math.random() - .5) * .6, vy: (Math.random() - .5) * .6, r: 1 + Math.random() * 1.8}));
     packets = [];
+    // Dòng mã rơi (digital rain) thưa, mờ: mỗi cột một chuỗi ký tự hex
+    streams = Array.from({length: Math.round(W / 70)}, () => newStream(true));
     if (self.on && !raf) draw(false);
+  }
+  const GLYPHS = "01ABCDEF<>/{}#$%アイウエオカキ";
+  function newStream(any) {
+    return {x: Math.floor(Math.random() * W / 18) * 18 + 6, y: any ? Math.random() * H : -Math.random() * H * .5,
+      v: 1.2 + Math.random() * 2.6, len: 8 + Math.floor(Math.random() * 16),
+      s: Array.from({length: 24}, () => GLYPHS[Math.floor(Math.random() * GLYPHS.length)])};
   }
   function draw(move) {
     cx.clearRect(0, 0, W, H);
+    cx.font = "13px Consolas, monospace";
+    for (let k = 0; k < streams.length; k++) {
+      const st = streams[k];
+      if (move) { st.y += st.v; if (Math.random() < .05) st.s[Math.floor(Math.random() * st.s.length)] = GLYPHS[Math.floor(Math.random() * GLYPHS.length)]; }
+      for (let i = 0; i < st.len; i++) {
+        const y = st.y - i * 16; if (y < -16 || y > H + 16) continue;
+        cx.fillStyle = i === 0 ? `rgba(${c1},.75)` : `rgba(${i % 5 === 0 ? c2 : c1},${(.32 * (1 - i / st.len)).toFixed(3)})`;
+        cx.fillText(st.s[i % st.s.length], st.x, y);
+      }
+      if (st.y - st.len * 16 > H) streams[k] = newStream(false);
+    }
     if (move) for (const p of nodes) {
       p.x += p.vx; p.y += p.vy;
       if (p.x < 0 || p.x > W) p.vx *= -1;
@@ -1154,7 +1307,7 @@ const fx = (() => {
       if (d2 > LINK * LINK) continue;
       cx.strokeStyle = `rgba(${c1},${(.5 * (1 - Math.sqrt(d2) / LINK)).toFixed(3)})`;
       cx.beginPath(); cx.moveTo(a.x, a.y); cx.lineTo(b.x, b.y); cx.stroke();
-      if (move && packets.length < 14 && Math.random() < .0015) packets.push({a, b, k: 0});
+      if (move && packets.length < 24 && Math.random() < .003) packets.push({a, b, k: 0});
     }
     cx.fillStyle = `rgba(${c1},.75)`;
     for (const p of nodes) { cx.beginPath(); cx.arc(p.x, p.y, p.r, 0, 6.283); cx.fill(); }
@@ -1296,7 +1449,7 @@ const srcLabel = x => x.kind === "web" ? `🌐 ${x.title || x.url} — ${(() => 
 const citedOf = m => { const out = []; (m.content || "").replace(/\[(\d+(?:\s*[,;]\s*\d+)*)\]/g, (_, g) => g.split(/[,;]/).forEach(n => { n = +n; if ((m.sources || []).some(x => x.n === n) && !out.includes(n)) out.push(n); })); return out; };
 
 // Biểu đồ SVG từ khối ```chart của AI: {type, title, labels, series: [{name, data}]}
-function chartSvg(c) {
+function chatChartSvg(c) {
   const labels = (c.labels || []).map(String), series = (c.series || []).map(x => ({name: String(x.name || ""), data: (x.data || []).map(Number)}));
   if (!labels.length || !series.length || series.some(x => x.data.some(v => !isFinite(v)))) throw new Error("bad chart");
   const col = i => `var(--c${i % 4})`, W = 640, H = 320, cut = (x, n) => x.length > n ? x.slice(0, n - 1) + "…" : x;
@@ -1369,7 +1522,7 @@ function renderAnswer(m, mi) {
     if (kind === "chart" || (kind === "json" && /"series"/.test(body))) {
       if (!close) { html += `<div class="chartbox muted">${t("chartDrawing")}</div>`; continue; }
       try {
-        const c = JSON.parse(body); const svg = chartSvg(c);
+        const c = JSON.parse(body); const svg = chatChartSvg(c);
         m.blocks.push({chart: c});
         html += `<div class="chartbox">${c.title ? `<div class="ct">${esc(c.title)}</div>` : ""}${svg}</div>` + bar("toExcelChart");
       } catch (e) { html += `<div class="chartbox err">${t("chartBad")}</div><pre>${esc(body)}</pre>`; }
