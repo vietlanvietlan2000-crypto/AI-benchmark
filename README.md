@@ -162,9 +162,22 @@ Mỗi câu hỏi đi qua hai bước: tìm các đoạn gần câu hỏi nhất 
 tính vào), rồi đưa cho AI **đọc trọn tài liệu đó**; tài liệu dài quá ngữ cảnh thì chỉ đưa các đoạn liên quan kèm đoạn liền kề.
 Dưới mỗi câu trả lời có tên tài liệu AI đã đọc, bấm vào để mở file.
 
+**Trò chuyện tự nhiên.** Trước khi tra cứu, chatbot phân loại tin nhắn: câu chào hỏi, cảm ơn, hỏi "bạn làm được gì", hay yêu cầu
+tóm tắt / dịch / lập bảng từ câu trả lời trước thì đáp lại ngay như trò chuyện bình thường, không tra tài liệu (dưới câu trả lời ghi
+"💬 Trò chuyện"). Câu xã giao rõ ràng được nhận ra tức thì; câu khác do chính model trả lời phân loại (khoảng 2–3 giây), đồng thời viết lại
+câu hỏi nối tiếp như "còn thai sản thì sao?" thành câu tìm kiếm đầy đủ để tìm đúng tài liệu. Khi phân vân, chatbot chọn tra tài liệu.
+
 **Trích dẫn nguồn.** Mỗi ý trong câu trả lời có số nguồn dạng `[2]`. Dưới câu trả lời liệt kê từng nguồn kèm vị trí:
-trang (PDF), mục theo tiêu đề (Word, Markdown), sheet (Excel). Bấm vào số hoặc dòng nguồn để mở khung xem tài liệu:
-đoạn được trích dẫn có nền vàng, dòng khớp với câu trả lời được tô đậm hơn. Nút "Mở file gốc" mở file bằng ứng dụng mặc định.
+trang (PDF), mục theo tiêu đề (Word, Markdown), sheet (Excel). Bấm vào số hoặc dòng nguồn để mở khung xem tài liệu.
+Nút "Mở file gốc" mở file bằng ứng dụng mặc định.
+
+- **PDF và file ảnh** mở ở tab **📄 Trang gốc**: hiện đúng trang AI đã dùng như bản in, chỗ AI lấy thông tin được **tô vàng**
+  ngay trên trang. Thanh trên cùng có nút chuyển trang, ô nhập số trang và các nút nhảy nhanh tới những trang AI đã dùng.
+  - PDF có chữ: vị trí tô lấy chính xác từ lớp chữ của PDF.
+  - Trang scan / ảnh: model OCR (vd. chandra-ocr) cho khung của từng khối chữ, app dò thêm trên ảnh để tìm đúng hàng bảng
+    hoặc dòng chữ (bám theo cả trang scan hơi nghiêng). Đây là vị trí ước lượng; model OCR không trả tọa độ thì không tô được trên ảnh.
+- Tab **📝 Văn bản** (và Word, Excel, Markdown, txt): hiện chữ đã trích của cả tài liệu, đoạn được trích dẫn có nền vàng,
+  dòng khớp với câu trả lời được tô đậm hơn.
 
 **Bảng, Excel, biểu đồ.** Yêu cầu "lập bảng…" thì AI trả về bảng, dưới bảng có nút **Xuất Excel**. Yêu cầu "vẽ biểu đồ cột / đường / tròn…"
 thì giao diện vẽ biểu đồ, nút **Xuất Excel (kèm biểu đồ)** tạo file có cả số liệu lẫn biểu đồ Excel.

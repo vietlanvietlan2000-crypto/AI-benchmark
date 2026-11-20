@@ -265,11 +265,27 @@
   .chartbox svg { height: auto; background: transparent; }
   .chartbox .ct { font-weight: 700; text-align: center; margin-bottom: 4px; }
   #viewer { position: fixed; inset: 0; z-index: 20; background: rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center; padding: 20px; }
-  #viewer .box { background: var(--bg2); border: 1px solid var(--line); border-radius: var(--radius); width: min(900px, 100%); max-height: 100%;
+  #viewer .box { background: var(--bg2); border: 1px solid var(--line); border-radius: var(--radius); width: min(1100px, 100%); height: 100%; max-height: 100%;
                  display: flex; flex-direction: column; box-shadow: var(--shadow); }
   #viewer .vh { display: flex; gap: 10px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--line); }
   #viewer .vh b { flex: 1; word-break: break-word; }
-  #viewerBody { overflow: auto; padding: 14px 18px; }
+  #viewerBody { overflow: auto; padding: 14px 18px; flex: 1; }
+  .vtabs { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .vtabs button { border: 0; border-radius: 0; padding: 5px 12px; font-size: 12.5px; }
+  .vtabs button.on { background: var(--accent); color: var(--accent-text); font-weight: 700; }
+  /* Trang gốc: ảnh trang + khung vàng ở chỗ AI đã dùng */
+  .pgbar { position: sticky; top: -14px; z-index: 2; display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center;
+           margin: -14px -18px 12px; padding: 8px 18px; background: var(--bg2); border-bottom: 1px solid var(--line); font-size: 12.5px; }
+  .pgbar button { padding: 3px 10px; font-size: 12.5px; }
+  .pgbar input { width: 64px; padding: 3px 6px; margin: 0; }
+  .pgbar .hitpg { border-color: var(--warn); color: var(--warn); }
+  .pgbar .hitpg.on { background: var(--warn); color: #131a26; font-weight: 700; }
+  .pgnote { width: 100%; }
+  .pgwrap { position: relative; margin: 0 auto; max-width: 900px; background: #fff; box-shadow: 0 4px 22px rgba(0,0,0,.35); }
+  .pgwrap img { display: block; width: 100%; height: auto; }
+  .pgwrap .mk { position: absolute; background: rgba(255, 214, 0, .5); mix-blend-mode: multiply; pointer-events: none;
+                animation: mkPulse 1.6s ease-out 2; }
+  @keyframes mkPulse { 0% { box-shadow: 0 0 0 0 rgba(250, 204, 21, .8); } 100% { box-shadow: 0 0 0 12px rgba(250, 204, 21, 0); } }
   .vloc { margin: 14px 0 4px; font-size: 12px; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: .03em; }
   .vchunk { white-space: pre-wrap; word-break: break-word; padding: 4px 8px; border-left: 3px solid transparent; border-radius: 4px; }
   .vchunk.hit { border-left-color: var(--warn); background: rgba(250, 204, 21, .16); }
@@ -400,7 +416,9 @@
 </section>
 <div id="zoom"><img alt=""></div>
 <div id="viewer" hidden><div class="box">
-  <div class="vh"><b id="viewerTitle"></b><button id="viewerOpen"></button><button id="viewerClose">✕</button></div>
+  <div class="vh"><b id="viewerTitle"></b>
+    <span class="vtabs" id="viewerTabs" hidden><button data-vt="page" data-i18n="vtPage"></button><button data-vt="text" data-i18n="vtText"></button></span>
+    <button id="viewerOpen"></button><button id="viewerClose">✕</button></div>
   <div id="viewerBody"></div>
 </div></div>
 <script>
@@ -451,6 +469,11 @@ const T = {
     locPage: n => `trang ${n}`, locSheet: n => `sheet ${n}`, locSec: n => `mục ${n}`, locPart: n => `đoạn ${n}`,
     toExcel: "Xuất Excel", toExcelChart: "Xuất Excel (kèm biểu đồ)", chartDrawing: "Đang vẽ biểu đồ…", chartBad: "Không vẽ được biểu đồ (dữ liệu AI trả về không hợp lệ).",
     viewOpenFile: "Mở file gốc", viewOpenWeb: "Mở trang web", viewLoading: "Đang mở…",
+    vtPage: "📄 Trang gốc", vtText: "📝 Văn bản", pgOf: n => `/ ${n}`, pgPage: "Trang", pgHits: "Trang AI đã dùng:",
+    pgNoMark: "Không định vị được dòng khớp trên trang này. Xem tab 📝 Văn bản để thấy đoạn được trích dẫn.",
+    pgNoBox: "Model OCR đã dùng không trả về vị trí chữ nên không tô được trên ảnh. Xem tab 📝 Văn bản.",
+    pgOcrNote: "Trang scan: vị trí tô vàng ước lượng theo khối chữ mà model OCR nhận ra.",
+    pgMarks: n => `${n} chỗ được tô vàng`,
     chatSetup: "Chatbot", chatModel: "Model trả lời", chatUseDocs: "Tra cứu tài liệu trước khi trả lời",
     chatUseDocsHelp: "Bật: AI chỉ trả lời theo tài liệu trong thư mục bên dưới. Tắt: chat tự do với model.",
     embedGroupOk: "Model embedding (dùng được ngay)", embedGroupOther: "Model khác (cần đổi loại trong LM Studio)",
@@ -478,7 +501,7 @@ const T = {
     docsOtherModel: m => `Chỉ mục hiện tại lập bằng ${m}. Bấm "Cập nhật chỉ mục" để lập lại bằng model đang chọn.`,
     docsNoIndex: "Chưa lập chỉ mục. Bấm \"Cập nhật chỉ mục\" để bắt đầu.",
     fIndexed: n => `đã lập chỉ mục (${n} đoạn)`, fNew: "mới hoặc đã sửa, chưa lập chỉ mục", fEmpty: "không đọc được chữ (có thể là bản scan)",
-    srcLabel: "Tài liệu đã đọc:", srcFull: "cả tài liệu", srcPart: "trích đoạn", srcNone: "Không tìm thấy tài liệu liên quan.",
+    srcLabel: "Tài liệu đã đọc:", srcFull: "cả tài liệu", srcPart: "trích đoạn", srcNone: "Không tìm thấy tài liệu liên quan.", srcChat: "💬 Trò chuyện – câu này không cần tra tài liệu.",
     chatStats: (s, tps, ctx) => `${s} giây · ${tps} token/giây · ngữ cảnh ${ctx} token`,
     mdirLabel: "Thư mục model của LM Studio", mdirOther: "Thư mục khác…", mdirDefault: "mặc định",
     mdirOpt: (n, free) => `${n} model · ổ còn trống ${free} GB`,
@@ -549,6 +572,11 @@ const T = {
     locPage: n => `page ${n}`, locSheet: n => `sheet ${n}`, locSec: n => `section ${n}`, locPart: n => `passage ${n}`,
     toExcel: "Export to Excel", toExcelChart: "Export to Excel (with chart)", chartDrawing: "Drawing the chart…", chartBad: "Could not draw the chart (the AI returned invalid data).",
     viewOpenFile: "Open the original file", viewOpenWeb: "Open the web page", viewLoading: "Opening…",
+    vtPage: "📄 Original page", vtText: "📝 Text", pgOf: n => `/ ${n}`, pgPage: "Page", pgHits: "Pages the AI used:",
+    pgNoMark: "Could not locate the matching lines on this page. See the 📝 Text tab for the cited passage.",
+    pgNoBox: "The OCR model used does not return text positions, so nothing can be highlighted on the image. See the 📝 Text tab.",
+    pgOcrNote: "Scanned page: highlight positions are estimated from the text blocks the OCR model detected.",
+    pgMarks: n => `${n} highlighted spot(s)`,
     chatSetup: "Chatbot", chatModel: "Answering model", chatUseDocs: "Look up documents before answering",
     chatUseDocsHelp: "On: the AI answers only from the documents in the folder below. Off: free chat with the model.",
     embedGroupOk: "Embedding models (ready)", embedGroupOther: "Other models (type must be changed in LM Studio)",
@@ -576,7 +604,7 @@ const T = {
     docsOtherModel: m => `The current index was built with ${m}. Click "Update index" to rebuild it with the selected model.`,
     docsNoIndex: "No index yet. Click \"Update index\" to start.",
     fIndexed: n => `indexed (${n} passages)`, fNew: "new or edited, not indexed yet", fEmpty: "no readable text (possibly a scan)",
-    srcLabel: "Documents read:", srcFull: "whole document", srcPart: "excerpts", srcNone: "No relevant document found.",
+    srcLabel: "Documents read:", srcFull: "whole document", srcPart: "excerpts", srcNone: "No relevant document found.", srcChat: "💬 Small talk – no document lookup needed.",
     chatStats: (s, tps, ctx) => `${s} s · ${tps} tokens/s · context ${ctx} tokens`,
     mdirLabel: "LM Studio model folder", mdirOther: "Another folder…", mdirDefault: "default",
     mdirOpt: (n, free) => `${n} model${n === 1 ? "" : "s"} · ${free} GB free`,
@@ -614,6 +642,7 @@ const t = (k, ...a) => { const v = T[lang][k]; return typeof v === "function" ? 
 // Thêm module mới: bổ sung các chuỗi tiếng Việt của module vào đây; chuỗi chưa có sẽ hiện nguyên tiếng Việt.
 const D = {
   "Đang tìm kiếm trên internet…": "Searching the internet…",
+  "Đang hiểu câu hỏi…": "Understanding the question…",
   "Đang lập chỉ mục tài liệu, hãy đợi xong hoặc bấm Dừng": "Documents are being indexed; wait or click Stop",
   "Đã dừng. Phần đã làm (trang đã OCR, tài liệu đã lưu) được giữ lại, bấm Cập nhật chỉ mục để làm tiếp.": "Stopped. Work done so far (OCR'd pages, stored documents) is kept; click Update index to continue.", "Tài liệu này chưa có trong chỉ mục": "This document is not in the index",
   "Không tìm được kết quả trên internet (nguồn tìm kiếm không phản hồi). Hãy thử lại sau ít giây.": "No internet results (the search source did not respond). Try again in a few seconds.",
@@ -1542,7 +1571,8 @@ function paintChat() {
       const cited = citedOf(m), list = cited.length ? m.sources.filter(x => cited.includes(x.n)) : m.sources;
       if (m.stats || cited.length) meta += `<div>${t(cited.length ? "srcCited" : "srcRead")}</div>` +
         list.map(x => `<div class="srcrow" data-m="${mi}" data-n="${x.n}"><span class="cite">${x.n}</span><span class="where">${esc(srcLabel(x))}</span></div>`).join("");
-    } else if (m.sources && m.stats && (m.docs || m.web)) meta += t("srcNone");
+    } else if (m.chat && m.stats) meta += t("srcChat");
+    else if (m.sources && m.stats && (m.docs || m.web)) meta += t("srcNone");
     if (m.stats) meta += `<div style="margin-top:4px">${t("chatStats", fmt(m.stats.seconds), fmt(m.stats.tps), fmt(m.ctx))}</div>`;
     const body = m.error ? `<span class="err">${esc(tr(m.error))}</span>` : m.content ? renderAnswer(m, mi) : `<span class="st">${esc(tr(m.status || ""))}</span>`;
     return `<div class="msg bot">${body}${meta ? `<div class="meta">${meta}</div>` : ""}</div>`;
@@ -1574,16 +1604,79 @@ async function openSource(mi, n) {
   viewerSrc = x;
   $("viewer").hidden = false;
   $("viewerOpen").textContent = t(x.kind === "web" ? "viewOpenWeb" : "viewOpenFile");
+  $("viewerTabs").hidden = true;
   if (x.kind === "web") {
     $("viewerTitle").textContent = x.title || x.url;
     $("viewerBody").innerHTML = `<div class="help" style="word-break:break-all">${esc(x.url)}</div><div class="vchunk hit main" style="margin-top:10px">${markLines(x.text || "", citeText(m, n))}</div>`;
     return;
   }
   $("viewerTitle").textContent = x.doc;
+  // PDF và file ảnh: mở thẳng trang gốc (đúng trang AI đã dùng), có tab Văn bản để xem chữ đã trích
+  const paged = /\.(pdf|jpe?g|png|webp|bmp|tiff?)$/i.test(x.doc);
+  const cited = citedOf(m), used = m.sources.filter(s => s.kind === "doc" && s.doc === x.doc && (cited.includes(s.n) || s.n === n));
+  const hitPages = new Map();  // trang → những câu trả lời trích nguồn nằm ở trang đó
+  for (const s of used) {
+    const p = s.loc && s.loc[0] === "page" ? s.loc[1] : 1;
+    hitPages.set(p, ((hitPages.get(p) || "") + " " + citeText(m, s.n)).trim());
+  }
+  const first = x.loc && x.loc[0] === "page" ? x.loc[1] : 1;
+  viewer = {m, n, x, used, hitPages, page: first, pages: 0, mode: paged ? "page" : "text"};
+  $("viewerTabs").hidden = !paged;
+  showViewer();
+}
+let viewer = null;
+function showViewer() {
+  document.querySelectorAll("#viewerTabs button").forEach(b => b.classList.toggle("on", b.dataset.vt === viewer.mode));
+  return viewer.mode === "page" ? showPage(viewer.page) : showText();
+}
+async function showPage(p) {
+  const v = viewer, doc = v.x.doc;
+  v.page = p;
+  const hits = [...v.hitPages.keys()].sort((a, b) => a - b);
+  const bar = () => `<div class="pgbar"><button data-pg="${v.page - 1}"${v.page <= 1 ? " disabled" : ""}>‹</button>
+    <span>${t("pgPage")} <input type="number" id="pgIn" min="1" max="${v.pages || ""}" value="${v.page}"> ${v.pages ? t("pgOf", v.pages) : ""}</span>
+    <button data-pg="${v.page + 1}"${v.pages && v.page >= v.pages ? " disabled" : ""}>›</button>
+    <span class="muted">${t("pgHits")}</span>${hits.map(h => `<button class="hitpg${h === v.page ? " on" : ""}" data-pg="${h}">${h}</button>`).join("")}
+    <span class="muted pgnote" id="pgNote"></span></div>`;
+  $("viewerBody").innerHTML = bar() + `<div class="muted">${t("viewLoading")}</div>`;
+  try {
+    const answer = v.hitPages.get(p) || "";
+    const mk = await api("/api/chat/marks", {method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({path: doc, page: p, answer})});
+    if (viewer !== v || v.page !== p) return;  // người dùng đã chuyển trang khác
+    v.pages = mk.pages;
+    const boxes = mk.boxes.map(([x0, y0, x1, y1]) =>
+      `<div class="mk" style="left:${x0 * 100}%;top:${y0 * 100}%;width:${(x1 - x0) * 100}%;height:${(y1 - y0) * 100}%"></div>`).join("");
+    $("viewerBody").innerHTML = bar() + `<div class="pgwrap"><img id="pgImg" alt="" src="/api/chat/page?path=${encodeURIComponent(doc)}&page=${p}">${boxes}</div>`;
+    const note = !answer ? "" : mk.source === "ocr-nobox" ? t("pgNoBox") : !mk.boxes.length ? t("pgNoMark")
+      : t("pgMarks", mk.boxes.length) + (mk.source === "ocr" ? " · " + t("pgOcrNote") : "");
+    $("pgNote").textContent = note;
+    $("pgImg").onload = () => {  // cuộn tới chỗ tô vàng đầu tiên
+      const el = document.querySelector(".pgwrap .mk"), body = $("viewerBody");
+      body.scrollTop = el ? el.offsetTop + el.offsetParent.offsetTop - body.clientHeight / 3 : 0;
+    };
+  } catch (e) { $("viewerBody").innerHTML = bar() + `<div class="err">${esc(e.message)}</div>`; }
+}
+$("viewerBody").addEventListener("click", e => {
+  const b = e.target.closest("button[data-pg]");
+  if (b && !b.disabled && viewer) showPage(+b.dataset.pg);
+});
+$("viewerBody").addEventListener("change", e => {
+  if (e.target.id !== "pgIn" || !viewer) return;
+  const p = Math.round(+e.target.value);
+  if (p >= 1 && (!viewer.pages || p <= viewer.pages)) showPage(p); else e.target.value = viewer.page;
+});
+$("viewerTabs").onclick = e => {
+  const b = e.target.closest("button[data-vt]");
+  if (b && viewer && viewer.mode !== b.dataset.vt) { viewer.mode = b.dataset.vt; showViewer(); }
+};
+async function showText() {
+  const v = viewer, {m, n, x, used} = v;
   $("viewerBody").innerHTML = `<div class="muted">${t("viewLoading")}</div>`;
   try {
-    const d = await api("/api/chat/doc?path=" + encodeURIComponent(x.doc)), cited = citedOf(m);
-    const hits = new Map(m.sources.filter(s => s.kind === "doc" && s.doc === x.doc && (cited.includes(s.n) || s.n === n)).map(s => [s.i, s.n]));
+    const d = await api("/api/chat/doc?path=" + encodeURIComponent(x.doc));
+    if (viewer !== v || v.mode !== "text") return;  // người dùng đã mở nguồn khác / đổi tab
+    const hits = new Map(used.map(s => [s.i, s.n]));
     let prev = null;
     $("viewerBody").innerHTML = d.chunks.map(c => {
       const key = JSON.stringify(c.loc), head = c.loc && key !== prev ? `<div class="vloc">${esc(locLabel(c))}${c.ocr ? '<span class="ocr">OCR</span>' : ""}</div>` : "";
@@ -1636,6 +1729,7 @@ async function chatSend() {
         if (!line) continue;
         const ev = JSON.parse(line);
         if (ev.type === "status") bot.status = ev.text;
+        else if (ev.type === "route") bot.chat = ev.mode === "chat";
         else if (ev.type === "sources") { bot.sources = ev.sources; bot.ctx = ev.ctx; }
         else if (ev.type === "text") bot.content += ev.text;
         else if (ev.type === "done") bot.stats = ev;

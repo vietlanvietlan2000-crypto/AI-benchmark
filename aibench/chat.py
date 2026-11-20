@@ -14,7 +14,7 @@ import httpx
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response, StreamingResponse
 
-from . import rag, websearch
+from . import pages, rag, websearch
 from .core import LM_URL
 from .lmstudio import LMStudio, _lms
 
@@ -27,12 +27,38 @@ CTX_WANT = 16384  # ngữ cảnh khi chatbot tự nạp model (đủ để đọ
 EMBED_CTX = 4096  # ngữ cảnh của model embedding: mỗi đoạn tài liệu chỉ dài khoảng 1.200 ký tự
 OCR_CTX = 16384  # ngữ cảnh của model OCR: ảnh 1 trang ~2.200 token + chữ đọc ra, nhân số trang OCR cùng lúc
 SYSTEM = (
-    "Bạn là trợ lý tra cứu. Chỉ trả lời dựa trên các NGUỒN THAM KHẢO được đánh số trong tin nhắn. "
-    "Sau mỗi ý, ghi số của nguồn đã dùng trong ngoặc vuông, ví dụ [2] hoặc [1][3]. "
-    "Nếu các nguồn không có thông tin cần hỏi, hãy nói rõ là không tìm thấy, không tự bịa. "
-    "Trả lời ngắn gọn, bằng ngôn ngữ của câu hỏi."
+    "Bạn là trợ lý tra cứu thân thiện, trả lời như một đồng nghiệp am hiểu tài liệu: tự nhiên, rõ ràng, đi thẳng vào ý chính. "
+    "Thông tin thực tế (quy định, số liệu, thông số, quy trình…) chỉ lấy từ các NGUỒN THAM KHẢO được đánh số trong tin nhắn; "
+    "sau mỗi ý lấy từ nguồn, ghi số nguồn trong ngoặc vuông, ví dụ [2] hoặc [1][3]. "
+    "Nếu các nguồn không có thông tin cần hỏi, nói thẳng là chưa tìm thấy trong tài liệu và gợi ý cách hỏi khác, không tự bịa. "
+    "Câu chào hỏi, cảm ơn hay trao đổi xã giao thì đáp lại tự nhiên, không cần nhắc tới nguồn. "
+    "Trả lời bằng ngôn ngữ của người dùng."
 )
-SYSTEM_PLAIN = "Bạn là trợ lý AI hữu ích. Trả lời ngắn gọn, bằng ngôn ngữ của câu hỏi."
+SYSTEM_PLAIN = "Bạn là trợ lý AI thân thiện, hữu ích. Trò chuyện tự nhiên, trả lời rõ ràng, bằng ngôn ngữ của người dùng."
+SYSTEM_CHAT = (
+    "Bạn là trợ lý AI thân thiện của doanh nghiệp, có thể tra cứu kho tài liệu nội bộ{docs}. "
+    "Tin nhắn này không cần tra tài liệu: hãy trò chuyện tự nhiên, ngắn gọn, ấm áp, bằng ngôn ngữ của người dùng. "
+    "Khi được hỏi bạn làm được gì: giới thiệu bạn tra cứu tài liệu nội bộ và trích dẫn trang/mục, lập bảng, xuất Excel, vẽ biểu đồ"
+    "{web}. Đừng tự bịa nội dung tài liệu; nếu người dùng cần thông tin trong tài liệu, mời họ hỏi cụ thể."
+)
+ROUTER = (
+    "Bạn là bộ phân loại tin nhắn cho một trợ lý tra cứu tài liệu nội bộ{docs}. Nguồn tra cứu đang bật: {sources}.\n"
+    "Đọc đoạn hội thoại và TIN NHẮN CUỐI của người dùng, trả về DUY NHẤT một dòng JSON:\n"
+    '{{"action": "chat" hoặc "search", "query": "..."}}\n'
+    '- "chat": chào hỏi, cảm ơn, tạm biệt, khen chê, hỏi bạn là ai / làm được gì, tán gẫu; yêu cầu viết lại, dịch, tóm tắt, '
+    "rút gọn, đổi định dạng, lập bảng, vẽ biểu đồ từ nội dung ĐÃ CÓ trong hội thoại.\n"
+    '- "search": cần thông tin thực tế (quy định, chính sách, số liệu, thông số kỹ thuật, quy trình, sản phẩm, giá…) '
+    'hoặc hỏi về nội dung tài liệu. Khi phân vân, chọn "search".\n'
+    '- "query" (khi search): viết lại tin nhắn cuối thành câu tìm kiếm đầy đủ, tự hiểu được mà không cần hội thoại '
+    "(thay \"nó\", \"cái đó\", \"còn … thì sao\" bằng đối tượng cụ thể), giữ nguyên ngôn ngữ và thuật ngữ, mã hiệu.\n"
+    "Không giải thích, không thêm chữ nào ngoài JSON."
+)
+# Câu xã giao rõ ràng: không cần hỏi model phân loại
+SMALLTALK = re.compile(
+    r"^\s*(hi+|hello+|hey+|helo|alo+|chào|xin chào|chào (bạn|em|anh|chị|bot|ad)|hế lô|hi there|good (morning|afternoon|evening)|"
+    r"cảm ơn|cám ơn|cảm ơn (bạn|em|nhiều|nha|nhé)|thanks?( you)?|thank you( so much)?|tks|ok+|oke+|okay|được rồi|tốt lắm|tuyệt|"
+    r"bye|tạm biệt|bái bai|hẹn gặp lại|bạn (là ai|tên gì)|you are who|who are you)"
+    r"[\s!.?,~:)(^❤️👍😊🙂]*((bạn|nhé|nha|nhiều|ạ|à|ơi|bot|em|anh|chị|so much|a lot)[\s!.?,~:)(^❤️👍😊🙂]*){0,3}$", re.I)
 FORMAT = (
     " Khi người dùng muốn bảng số liệu hoặc file Excel: trình bày số liệu bằng bảng Markdown (giao diện có sẵn nút xuất Excel "
     "cho mỗi bảng, đừng nói rằng bạn không tạo được file). Khi người dùng muốn biểu đồ: viết một khối mã ```chart chứa JSON dạng "
@@ -189,6 +215,31 @@ async def get_doc(path: str) -> dict[str, Any]:
     return {"path": path, "chunks": [{"i": c["i"], "loc": c.get("loc"), "text": c["text"], "ocr": c.get("ocr", False)} for c in chunks]}
 
 
+@router.get("/page")
+async def get_page(path: str, page: int = 1) -> Response:
+    """Ảnh 1 trang của tài liệu gốc (PDF / file ảnh)."""
+    try:
+        p = pages.resolve(path)
+        if not pages.kind(p) or not 1 <= page <= pages.page_count(p):
+            raise FileNotFoundError(path)
+        jpg = await asyncio.to_thread(pages.render, p, page)
+    except FileNotFoundError:
+        raise HTTPException(404, "Không có trang này") from None
+    return Response(jpg, media_type="image/jpeg", headers={"Cache-Control": "max-age=300"})
+
+
+@router.post("/marks")
+async def get_marks(body: dict[str, Any]) -> dict[str, Any]:
+    """Khung tô vàng trên 1 trang: các dòng khớp với câu trả lời. body: {path, page, answer}."""
+    try:
+        p = pages.resolve(str(body.get("path", "")))
+        if not pages.kind(p):
+            raise FileNotFoundError
+        return await asyncio.to_thread(pages.marks, p, int(body.get("page") or 1), str(body.get("answer") or ""))
+    except FileNotFoundError:
+        raise HTTPException(404, "Tài liệu này không xem được dạng trang") from None
+
+
 def _num(v: Any) -> Any:
     """Chữ trông như số (kiểu Việt: 6.490.000 hoặc 5,5) thì đổi thành số để Excel tính toán được."""
     if not isinstance(v, str):
@@ -265,6 +316,39 @@ async def _web_passages(question: str, budget: int) -> list[dict[str, Any]]:
     return out
 
 
+def _catalog(limit: int = 30) -> str:
+    """Tên ngắn các tài liệu đang có, để model biết kho tài liệu nói về gì."""
+    names = sorted(index().files)
+    if not names:
+        return ""
+    short = [re.sub(r"\.\w+$", "", n.rsplit("/", 1)[-1]) for n in names[:limit]]  # chỉ tên file, không đường dẫn
+    more = f" và {len(names) - limit} tài liệu khác" if len(names) > limit else ""
+    return " (gồm: " + "; ".join(short) + more + ")"
+
+
+async def _route(model: str, history: list[dict[str, Any]], question: str, use_docs: bool, use_web: bool) -> tuple[str, str]:
+    """Phân loại tin nhắn: ("chat", "") nếu không cần tra cứu, ("search", câu tìm kiếm đã viết lại) nếu cần.
+    Câu xã giao rõ ràng nhận ra ngay; còn lại hỏi nhanh model đang dùng. Lỗi hay trả lời lạ thì coi như cần tra cứu."""
+    if SMALLTALK.match(question):
+        return "chat", ""
+    sources = " và ".join(x for x, on in (("tài liệu nội bộ", use_docs), ("internet", use_web)) if on)
+    convo = "\n".join(f"{'Người dùng' if m['role'] == 'user' else 'Trợ lý'}: {m['content'][:600]}" for m in history[-4:])
+    payload = {"model": model, "temperature": 0, "max_tokens": 600, "reasoning_effort": "none", "stream": False,
+               "messages": [{"role": "system", "content": ROUTER.format(docs=_catalog() if use_docs else "", sources=sources)},
+                            {"role": "user", "content": (f"HỘI THOẠI TRƯỚC:\n{convo}\n\n" if convo else "") + f"TIN NHẮN CUỐI: {question}"}]}
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(60, connect=5)) as http:
+            r = await http.post(f"{LM_URL}/v1/chat/completions", json=payload)
+        text = r.json()["choices"][0]["message"].get("content") or ""
+        m = re.search(r"\{.*\}", text, re.S)
+        obj = json.loads(m.group()) if m else {}
+    except Exception:  # noqa: BLE001
+        return "search", ""
+    if str(obj.get("action", "")).lower() == "chat":
+        return "chat", ""
+    return "search", str(obj.get("query") or "").strip()
+
+
 @router.post("/ask")
 async def ask(body: dict[str, Any]) -> StreamingResponse:
     _check_idle()
@@ -286,24 +370,35 @@ async def ask(body: dict[str, Any]) -> StreamingResponse:
             used = sum(len(m["content"]) for m in history) + len(question)
             budget = max(1500, min(40000, int((ctx - 1500) * 2.2) - used))
             passages: list[dict[str, Any]] = []
-            if use_docs:
+            action, query = "plain", ""  # plain: người dùng tắt cả tài liệu lẫn internet
+            if use_docs or use_web:
+                yield ev(type="status", text="Đang hiểu câu hỏi…")
+                action, query = await _route(model, history, question, use_docs, use_web)
+                yield ev(type="route", mode=action, query=query)
+            chatting = action == "chat"
+            docs_on, web_on = use_docs and not chatting, use_web and not chatting
+            if docs_on:
                 ix = index()
                 if not ix.chunks:
                     raise RuntimeError("Chưa có chỉ mục tài liệu. Hãy bấm \"Cập nhật chỉ mục\" trước.")
                 yield ev(type="status", text="Đang tìm tài liệu liên quan…")
                 await _prepare_embed(ix.model)
-                found = await rag.retrieve(ix, f"{prev}\n{question}".strip(), budget * 6 // 10 if use_web else budget)  # kèm câu trước để hiểu câu hỏi nối tiếp
+                # câu tìm kiếm đã được viết lại cho đủ ý; không có thì ghép câu trước để hiểu câu hỏi nối tiếp
+                q = f"{query}\n{question}" if query else f"{prev}\n{question}".strip()
+                found = await rag.retrieve(ix, q, budget * 6 // 10 if web_on else budget)
                 passages += [{"kind": "doc", "doc": c["doc"], "i": c["i"], "loc": c.get("loc"), "text": c["text"]} for c in found]
-            if use_web:
+            if web_on:
                 yield ev(type="status", text="Đang tìm kiếm trên internet…")
-                q = question if len(question) > 25 or not prev else f"{prev} {question}"
+                q = query or (question if len(question) > 25 or not prev else f"{prev} {question}")
                 passages += await _web_passages(q, budget - sum(len(x["text"]) for x in passages))
             for n, x in enumerate(passages, 1):
                 x["n"] = n
             yield ev(type="sources", ctx=ctx, sources=[{k: v for k, v in x.items() if k != "text" or x["kind"] == "web"} for x in passages])
 
             content, system = question, SYSTEM_PLAIN
-            if use_docs or use_web:
+            if chatting:  # trò chuyện: không đưa nguồn, để model đáp tự nhiên
+                system = SYSTEM_CHAT.format(docs=_catalog(12) if use_docs else "", web=", tìm kiếm trên internet" if use_web else "")
+            elif docs_on or web_on:
                 blocks = []
                 for x in passages:
                     if x["kind"] == "doc":
@@ -313,8 +408,10 @@ async def ask(body: dict[str, Any]) -> StreamingResponse:
                         blocks.append(f"[{x['n']}] Trang web: {x['title']} ({x['url']})\n{x['text']}")
                 content = "NGUỒN THAM KHẢO:\n" + ("\n\n".join(blocks) or "(không tìm thấy nguồn nào)") + f"\n\nCÂU HỎI: {question}"
                 system = SYSTEM + (f" Hôm nay là ngày {time.strftime('%d/%m/%Y')}." if use_web else "")
-            payload = {"model": model, "stream": True, "temperature": 0.2, "max_tokens": -1, "stream_options": {"include_usage": True},
+            payload = {"model": model, "stream": True, "temperature": 0.6 if chatting else 0.2, "max_tokens": -1, "stream_options": {"include_usage": True},
                        "messages": [{"role": "system", "content": system + FORMAT}, *history, {"role": "user", "content": content}]}
+            if chatting:  # trò chuyện không cần model suy nghĩ lâu: trả lời ngay
+                payload["reasoning_effort"] = "none"
             t0, tokens, thinking = time.perf_counter(), 0, False
             async with httpx.AsyncClient(timeout=httpx.Timeout(600, connect=5)) as http, \
                     http.stream("POST", f"{LM_URL}/v1/chat/completions", json=payload) as r:
