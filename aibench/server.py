@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse
 from .core import GPU_INDEX, LM_URL, ROOT, list_results, load_result, modules, run_module
 from .engine import engine_status, ram_total_mb
 from .gpu import gpu_info
-from . import chat
+from . import chat, history
 from . import setup as st
 from .lmstudio import LMStudio
 
@@ -35,6 +35,7 @@ def _running() -> dict[str, Any] | None:
 
 chat.busy = _running
 app.include_router(chat.router)
+app.include_router(history.router)
 
 
 @app.get("/")

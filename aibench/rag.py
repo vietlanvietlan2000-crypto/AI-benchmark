@@ -432,17 +432,20 @@ def words(s: str) -> set[str]:
     return {w for w in re.findall(r"\w+", s.lower()) if len(w) > 1}
 
 
-async def retrieve(ix: Index, query: str, budget: int, top_docs: int = 3) -> list[dict[str, Any]]:
+async def retrieve(ix: Index, query: str | list[str], budget: int, top_docs: int = 3) -> list[dict[str, Any]]:
     """Các đoạn cho AI đọc (theo thứ tự tài liệu, rồi thứ tự trong tài liệu). `budget` là tổng số ký tự tối đa.
-    Tài liệu vừa ngữ cảnh thì lấy trọn; tài liệu dài thì lấy đoạn trúng kèm đoạn liền trước/sau."""
+    Tài liệu vừa ngữ cảnh thì lấy trọn; tài liệu dài thì lấy đoạn trúng kèm đoạn liền trước/sau.
+    `query` có thể là nhiều câu (vd. câu hỏi tiếng Việt + bản tiếng Anh): mỗi câu tự xếp hạng rồi trộn thứ hạng,
+    nhờ vậy tài liệu tiếng Anh (datasheet, tiêu chuẩn) không bị tài liệu tiếng Việt cùng chủ đề lấn át."""
     if not ix.chunks:
         return []
-    q = (await embed(ix.model, [query], query=True))[0]
-    vec = ix.vecs @ q
+    queries = [q for q in ([query] if isinstance(query, str) else query) if q and q.strip()]
+    qv = await embed(ix.model, queries, query=True)
+    vecs = [ix.vecs @ v for v in qv]
     cw = [words(c["doc"] + " " + c["text"]) for c in ix.chunks]
-    qw = words(query)
+    qws = [words(q) for q in queries]
 
-    def keyword(idx: list[int]) -> np.ndarray:
+    def keyword(idx: list[int], qw: set[str]) -> np.ndarray:
         """Điểm trùng từ khóa của các đoạn idx (0..1). Từ càng hiếm trong nhóm đoạn này càng nặng ký (IDF);
         từ của câu hỏi không có trong nhóm (vd. "theo", "bao nhiêu") thì bỏ qua."""
         df = {w: sum(1 for k in idx if w in cw[k]) for w in qw}
@@ -453,15 +456,29 @@ async def retrieve(ix: Index, query: str, budget: int, top_docs: int = 3) -> lis
         return np.array([sum(v for w, v in idf.items() if w in cw[k]) / total for k in idx], dtype=np.float32)
 
     # Tầng 1 – chọn tài liệu: vector + từ khóa trên toàn bộ chỉ mục (tìm kiếm lai, bù cho model embedding
-    # yếu tiếng Việt, tên riêng, mã số).
-    score = vec + 0.3 * keyword(list(range(len(ix.chunks))))
-    best = np.argsort(-score)[:10]
-    docs: dict[str, float] = {}
-    for k in best:  # điểm tài liệu = đoạn tốt nhất + chút thưởng cho mỗi đoạn trúng thêm
-        d = ix.chunks[k]["doc"]
-        docs[d] = docs[d] + 0.05 if d in docs else float(score[k])
-    ranked = sorted(docs, key=lambda d: -docs[d])[:top_docs]
-    ranked = [d for d in ranked if docs[d] >= docs[ranked[0]] - 0.25]  # bỏ tài liệu kém xa tài liệu đầu
+    # yếu tiếng Việt, tên riêng, mã số). Mỗi câu tìm kiếm tự xếp hạng tài liệu (điểm = đoạn tốt nhất + chút thưởng,
+    # tối đa 0,1, khi có thêm đoạn lọt top 10). Không so điểm giữa các câu (câu tiếng Việt luôn cho điểm cao hơn với
+    # tài liệu tiếng Việt), mà lấy 2 tài liệu đầu của mỗi câu rồi trộn thứ hạng (reciprocal rank fusion).
+    allk = list(range(len(ix.chunks)))
+    fused: dict[str, float] = {}
+    picked: set[str] = set()
+    for v, qw in zip(vecs, qws):
+        score = v + 0.3 * keyword(allk, qw)
+        best: dict[str, float] = {}
+        for k in allk:
+            d = ix.chunks[k]["doc"]
+            best[d] = max(best.get(d, -9.0), float(score[k]))
+        hits: dict[str, int] = {}
+        for k in np.argsort(-score)[:10]:
+            d = ix.chunks[k]["doc"]
+            hits[d] = hits.get(d, 0) + 1
+        for d, n in hits.items():
+            best[d] += min(0.1, 0.03 * (n - 1))
+        order = sorted(best, key=lambda d: -best[d])
+        for r, d in enumerate(order):
+            fused[d] = fused.get(d, 0.0) + 1 / (2 + r)
+        picked |= {d for d in order[:2] if best[d] >= best[order[0]] - 0.25}  # bỏ tài liệu kém xa tài liệu đầu
+    ranked = sorted(picked, key=lambda d: -fused[d])[:top_docs]
     pos = {}
     for k, c in enumerate(ix.chunks):
         pos.setdefault(c["doc"], []).append(k)
@@ -470,25 +487,29 @@ async def retrieve(ix: Index, query: str, budget: int, top_docs: int = 3) -> lis
     left = budget
     for n, d in enumerate(ranked):
         mine = ix.of(d)
-        share = left if n == len(ranked) - 1 else int(left * 0.6)
+        # chia đều phần còn lại cho các tài liệu chưa xét; tài liệu ngắn dùng không hết thì phần dư sang tài liệu sau
+        share = left // (len(ranked) - n)
         if sum(len(c["text"]) for c in mine) <= share:
             keep = list(range(len(mine)))
         else:
             # Tầng 2 – chọn đoạn trong tài liệu dài: từ khóa hiếm *trong tài liệu này* (vd. "Tilting" giữa hàng chục
             # trang bảng na ná nhau) được tính nặng, rồi lấy các đoạn trúng nhất kèm đoạn liền trước/sau.
+            # Mỗi câu tìm kiếm xếp hạng riêng rồi trộn thứ hạng (không so điểm giữa câu tiếng Việt và tiếng Anh).
             idx = pos[d]
-            local = vec[idx] + 0.5 * keyword(idx)
+            local = np.zeros(len(idx))
+            for v, qw in zip(vecs, qws):
+                order = np.argsort(-(v[idx] + 0.5 * keyword(idx, qw)))
+                local[order] += 1 / (3 + np.arange(len(idx)))
             want: list[int] = []
             for i in (ix.chunks[idx[j]]["i"] for j in np.argsort(-local)[:8]):
                 for j in (i, i - 1, i + 1):
                     if 0 <= j < len(mine) and j not in want:
                         want.append(j)
             keep, used = [], 0
-            for j in want:
-                if used + len(mine[j]["text"]) > share:
-                    break
-                keep.append(j)
-                used += len(mine[j]["text"])
+            for j in want:  # đoạn quá dài so với phần còn lại thì bỏ qua, thử đoạn kế
+                if used + len(mine[j]["text"]) <= share:
+                    keep.append(j)
+                    used += len(mine[j]["text"])
             keep.sort()
         out += [mine[j] for j in keep]
         left -= sum(len(mine[j]["text"]) for j in keep)

@@ -13,6 +13,7 @@ Invoice_Ana/Raw_invoice/*
 
 # Chatbot: chỉ mục tài liệu là dữ liệu của từng máy; tài liệu thật không đưa lên GitHub, chỉ giữ bộ ví dụ
 rag_index/
+chat_history/
 Tai_lieu/*
 !Tai_lieu/Vi du/
 Tai_lieu/Vi du/*

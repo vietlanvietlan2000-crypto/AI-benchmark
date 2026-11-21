@@ -3,13 +3,17 @@
 - vẽ trang PDF / file ảnh thành ảnh JPEG để giao diện hiện đúng như bản gốc
 - tìm các dòng trên trang khớp với câu trả lời, trả về khung (tọa độ 0..1 theo bề rộng / cao trang):
     * trang PDF có chữ: lấy vị trí chữ từ PDF (pdfium), gom thành từng dòng
-    * trang scan / file ảnh: dùng tọa độ khối chữ mà model OCR (vd. chandra-ocr) trả về, chia khối thành dòng / hàng bảng
+    * trang scan / file ảnh: RapidOCR dò vị trí từng ô chữ trên ảnh (dùng được với mọi model OCR); không có thì dùng
+      tọa độ khối chữ mà model OCR (vd. chandra-ocr) trả về, chia khối thành dòng / hàng bảng
 """
 from __future__ import annotations
 
 import io
+import json
 import re
 import sqlite3
+import threading
+import unicodedata
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -95,12 +99,29 @@ def _pick(lines: list[tuple[str, list[float]]], answer: str) -> list[list[float]
     aw = set(_words(answer))
     if not aw:
         return []
-    scored = [(_score(t, aw), box) for t, box in lines]
-    best = max((s for s, _ in scored), default=0)
-    # Chỉ lấy các dòng khớp gần bằng dòng khớp nhất: bảng có nhiều hàng na ná nhau (cùng quy cách, khác tên)
-    # thì chỉ tô đúng hàng được nhắc tới. Không dòng nào khớp rõ (≥ 0,75) thì lấy dòng khớp nhất nếu đủ gần (≥ 0,5).
-    floor = 0.75 if best >= 0.75 else 0.5
-    hits = [b for s, b in scored if s >= max(floor, best - 0.08)]
+    # Một hàng bảng / dòng chữ có thể gồm vài khung (trang scan nghiêng): gom các khung liền nhau cùng chữ.
+    groups: list[tuple[str, list[list[float]]]] = []
+    for t, box in lines:
+        if groups and groups[-1][0] == t:
+            groups[-1][1].append(box)
+        else:
+            groups.append((t, [box]))
+    scored = [(_score(t, aw), set(_words(t)) & aw, boxes) for t, boxes in groups]
+    best = max((s for s, _, _ in scored), default=0)
+    floor = 0.75 if best >= 0.75 else 0.5  # không dòng nào khớp rõ thì nhận dòng khớp nhất nếu đủ gần
+    # Chọn theo độ phủ: dòng khớp nhất trước, sau đó chỉ thêm dòng mang thêm ≥ 2 từ / số MỚI của câu trả lời.
+    # Nhờ vậy hàng tiêu đề "Condition 1 (Normal)" và các hàng số liệu cùng được tô, còn các hàng na ná nhau
+    # (cùng quy cách, khác tên) không thêm gì mới nên không bị tô nhầm.
+    covered: set[str] = set()
+    hits: list[list[float]] = []
+    for s, hit, boxes in sorted(scored, key=lambda x: (-x[0], -len(x[1]))):
+        if s < floor or s < best - 0.4:
+            break
+        new = hit - covered
+        if hits and len(new) < 2:
+            continue
+        covered |= hit
+        hits += boxes
     return hits[:80]
 
 
@@ -150,8 +171,10 @@ def _ocr_raw(p: Path, page: int) -> str | None:
     try:
         row = db.execute("SELECT sha1 FROM docs WHERE path=?", (rag.rel(p),)).fetchone()
         sha = row[0] if row else rag.sha1(p)
-        r = db.execute("SELECT text FROM ocr WHERE sha1=? AND page=? ORDER BY rowid DESC", (sha, page)).fetchone()
-        return r[0] if r else None
+        # Một trang có thể đã OCR bằng nhiều model (vd. đổi model OCR rồi lập lại chỉ mục). Ưu tiên bản có tọa độ chữ
+        # (data-bbox, vd. chandra-ocr) để tô được trên ảnh, dù chỉ mục đang dùng chữ của model khác; không có thì lấy bản mới nhất.
+        rows = [r[0] for r in db.execute("SELECT text FROM ocr WHERE sha1=? AND page=? ORDER BY rowid DESC", (sha, page))]
+        return next((t for t in rows if "data-bbox" in t), rows[0] if rows else None)
     finally:
         db.close()
 
@@ -287,15 +310,137 @@ def _gray(p: Path, page: int) -> Any:
         return np.asarray(im.convert("L"))
 
 
+# ----- dò vị trí chữ trên ảnh trang scan (RapidOCR, chạy CPU) ----------------------------------------
+# Model OCR thị giác (Qwen-VL…) chỉ trả chữ, chandra-ocr chỉ trả khung cả khối. RapidOCR dò từng dòng / ô chữ trên
+# ảnh với tọa độ chính xác; chữ nó đọc kém hơn (hay dính liền các từ, không có dấu tiếng Việt) nên chỉ dùng để
+# định vị: so khớp bỏ dấu, ưu tiên con số và từ dài. Kết quả dò được lưu SQLite, mỗi trang chỉ dò 1 lần (~3–6 giây).
+_engine: Any = None
+_engine_lock = threading.Lock()
+NUM = re.compile(r"\d+(?:[.,]\d+)*")
+TOK = re.compile(r"\d+(?:[.,]\d+)*|[^\W\d_]+", re.U)
+
+
+def _fold(s: str) -> str:
+    s = unicodedata.normalize("NFD", s.replace("đ", "d").replace("Đ", "D"))
+    return "".join(ch for ch in s if unicodedata.category(ch) != "Mn").lower()
+
+
+def _detect(p: Path, page: int) -> list[dict[str, Any]] | None:
+    """Các ô chữ trên ảnh trang: [{t: chữ, b: [x0, y0, x1, y1] (0..1)}]; None nếu không có RapidOCR."""
+    db = sqlite3.connect(rag.DB, timeout=10)
+    try:
+        db.execute("CREATE TABLE IF NOT EXISTS layout (sha1 TEXT, page INTEGER, data TEXT, PRIMARY KEY (sha1, page))")
+        row = db.execute("SELECT sha1 FROM docs WHERE path=?", (rag.rel(p),)).fetchone()
+        sha = row[0] if row else rag.sha1(p)
+        hit = db.execute("SELECT data FROM layout WHERE sha1=? AND page=?", (sha, page)).fetchone()
+        if hit:
+            return json.loads(hit[0])
+        global _engine
+        with _engine_lock:
+            try:
+                if _engine is None:
+                    from rapidocr_onnxruntime import RapidOCR
+
+                    _engine = RapidOCR()
+            except ImportError:
+                return None
+            import numpy as np
+            from PIL import Image
+
+            with Image.open(io.BytesIO(render(p, page))) as im:
+                img = np.asarray(im.convert("RGB"))
+            res, _ = _engine(img)
+        H, W = img.shape[:2]
+        cells = []
+        for box, text, _conf in res or []:
+            xs, ys = [pt[0] for pt in box], [pt[1] for pt in box]
+            cells.append({"t": text, "b": [round(min(xs) / W, 4), round(min(ys) / H, 4), round(max(xs) / W, 4), round(max(ys) / H, 4)]})
+        with db:
+            db.execute("INSERT OR REPLACE INTO layout VALUES (?, ?, ?)", (sha, page, json.dumps(cells, ensure_ascii=False)))
+        return cells
+    finally:
+        db.close()
+
+
+def _rows(cells: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+    """Gom ô chữ thành hàng: duyệt từ trái sang phải, nối vào hàng có ô bên phải cùng cao độ (bám độ nghiêng trang scan)."""
+    rows: list[list[dict[str, Any]]] = []
+    for c in sorted(cells, key=lambda c: c["b"][0]):
+        x0, y0, x1, y1 = c["b"]
+        mid, h = (y0 + y1) / 2, y1 - y0
+        best, gap = None, h * 0.6
+        for r in rows:
+            last = r[-1]["b"]
+            d = abs((last[1] + last[3]) / 2 - mid)
+            if d < gap and last[2] <= x0 + h:
+                best, gap = r, d
+        if best is None:
+            rows.append([c])
+        else:
+            best.append(c)
+    return rows
+
+
+def _match(text: str, toks: set[str]) -> tuple[set[str], float]:
+    """Các từ / số của câu trả lời có trong 1 hàng chữ dò được, và tỉ lệ chữ của hàng được câu trả lời phủ."""
+    s = _fold(text)  # các ô nối bằng khoảng trắng; trong 1 ô, chữ dò được có thể dính liền nhau
+    found: set[str] = set()
+    covered = [False] * len(s)
+    for t in toks:
+        if NUM.fullmatch(t):  # số: không được dính liền chữ số khác (26.5 ≠ 126.5)
+            pat = r"(?<![\d.,])" + re.escape(t) + r"(?![\d]|[.,]\d)"
+        elif len(t) >= 4:  # từ dài: tìm như chuỗi con ("pressure" trong "opressure")
+            pat = re.escape(t)
+        else:  # từ ngắn: phải đứng riêng, tránh "la" khớp bừa trong "plant"
+            pat = r"\b" + re.escape(t) + r"\b"
+        ms = list(re.finditer(pat, s))
+        if ms:
+            found.add(t)
+            for m in ms:
+                for k in range(m.start(), m.end()):
+                    covered[k] = True
+    alnum = [k for k, ch in enumerate(s) if ch.isalnum()]
+    return found, (sum(covered[k] for k in alnum) / len(alnum)) if alnum else 0.0
+
+
+def _pick_detected(cells: list[dict[str, Any]], answer: str) -> list[list[float]]:
+    """Chọn hàng chữ khớp câu trả lời và trả khung từng ô chữ của các hàng đó (tô đúng ô, cả khi trang nghiêng)."""
+    toks = {t for t in TOK.findall(_fold(answer)) if NUM.fullmatch(t) and len(re.sub(r"\D", "", t)) >= 2 or not NUM.fullmatch(t) and len(t) >= 2}
+    scored = []
+    for r in _rows(cells):
+        found, cov = _match(" ".join(c["t"] for c in r), toks)
+        nums = sum(1 for t in found if NUM.fullmatch(t))
+        # hàng bảng có ≥ 2 con số của câu trả lời, hoặc dòng chữ phần lớn nằm trong câu trả lời
+        if nums >= 2 or cov >= 0.75 and len(found) >= 2 or nums >= 1 and cov >= 0.5:
+            scored.append((len(found) + nums, cov, found, r))
+    covered: set[str] = set()
+    out: list[list[float]] = []
+    for _n, _cov, found, r in sorted(scored, key=lambda x: (-x[0], -x[1])):
+        if out and len(found - covered) < 2:  # hàng na ná hàng đã chọn, không thêm thông tin mới
+            continue
+        covered |= found
+        out += [c["b"] for c in r]
+    return out[:120]
+
+
 def marks(p: Path, page: int, answer: str) -> dict[str, Any]:
     src, lines = "pdf", None
     if kind(p) == "pdf":
         lines = _pdf_lines(p, page)
-    if lines is None:
-        raw = _ocr_raw(p, page)
-        src = "ocr"
-        lines = _ocr_lines(raw, _gray(p, page)) if raw and re.search(r"data-bbox", raw) else []
-        if raw and not lines:
-            src = "ocr-nobox"  # model OCR không trả tọa độ: không tô được trên ảnh
-    boxes = _pick(lines, answer) if answer.strip() else []
+    if lines is not None:  # PDF có chữ: vị trí chính xác từ lớp chữ
+        boxes = _pick(lines, answer) if answer.strip() else []
+        return {"page": page, "pages": page_count(p), "source": src, "boxes": [[round(v, 4) for v in b] for b in boxes]}
+    boxes: list[list[float]] = []
+    src = "detect"
+    if answer.strip():
+        cells = _detect(p, page)
+        if cells:
+            boxes = _pick_detected(cells, answer)
+        if not boxes:  # không dò được / không khớp: dùng khung khối chữ của model OCR (vd. chandra-ocr) nếu có
+            raw = _ocr_raw(p, page)
+            src = "ocr"
+            lines = _ocr_lines(raw, _gray(p, page)) if raw and re.search(r"data-bbox", raw) else []
+            if not lines and cells is None:
+                src = "ocr-nobox"  # không có RapidOCR lẫn tọa độ từ model OCR: không tô được trên ảnh
+            boxes = _pick(lines, answer)
     return {"page": page, "pages": page_count(p), "source": src, "boxes": [[round(v, 4) for v in b] for b in boxes]}

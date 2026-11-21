@@ -6,6 +6,7 @@ import io
 import json
 import os
 import re
+import subprocess
 import time
 from collections.abc import AsyncIterator, Callable
 from typing import Any
@@ -16,7 +17,8 @@ from fastapi.responses import Response, StreamingResponse
 
 from . import pages, rag, websearch
 from .core import LM_URL
-from .lmstudio import LMStudio, _lms
+from .gpu import gpu_info
+from .lmstudio import _NO_WINDOW, LMStudio, _lms, _lms_exe
 
 router = APIRouter(prefix="/api/chat")
 busy: Callable[[], Any] = lambda: None  # server.py gán: trả job benchmark đang chạy (nếu có)
@@ -44,13 +46,16 @@ SYSTEM_CHAT = (
 ROUTER = (
     "Bạn là bộ phân loại tin nhắn cho một trợ lý tra cứu tài liệu nội bộ{docs}. Nguồn tra cứu đang bật: {sources}.\n"
     "Đọc đoạn hội thoại và TIN NHẮN CUỐI của người dùng, trả về DUY NHẤT một dòng JSON:\n"
-    '{{"action": "chat" hoặc "search", "query": "..."}}\n'
+    '{{"action": "chat" hoặc "search", "query": "...", "query_en": "..."}}\n'
     '- "chat": chào hỏi, cảm ơn, tạm biệt, khen chê, hỏi bạn là ai / làm được gì, tán gẫu; yêu cầu viết lại, dịch, tóm tắt, '
     "rút gọn, đổi định dạng, lập bảng, vẽ biểu đồ từ nội dung ĐÃ CÓ trong hội thoại.\n"
     '- "search": cần thông tin thực tế (quy định, chính sách, số liệu, thông số kỹ thuật, quy trình, sản phẩm, giá…) '
     'hoặc hỏi về nội dung tài liệu. Khi phân vân, chọn "search".\n'
     '- "query" (khi search): viết lại tin nhắn cuối thành câu tìm kiếm đầy đủ, tự hiểu được mà không cần hội thoại '
     "(thay \"nó\", \"cái đó\", \"còn … thì sao\" bằng đối tượng cụ thể), giữ nguyên ngôn ngữ và thuật ngữ, mã hiệu.\n"
+    '- "query_en" (khi search): cùng câu tìm kiếm đó dịch sang tiếng Anh theo cách viết của tài liệu kỹ thuật '
+    '(vd. "áp suất" → "pressure", "chế độ bình thường" → "normal condition", "nhiệt độ đầu vào" → "inlet temperature"), '
+    "giữ nguyên mã thiết bị, ký hiệu, con số. Nếu tin nhắn đã là tiếng Anh thì dịch sang tiếng Việt.\n"
     "Không giải thích, không thêm chữ nào ngoài JSON."
 )
 # Câu xã giao rõ ràng: không cần hỏi model phân loại
@@ -186,21 +191,72 @@ async def _prepare_embed(model: str) -> None:
                                f"hoặc chọn model embedding nhỏ hơn. ({e})") from e
 
 
+CTX_STEPS = (65536, 32768, 16384, 8192)  # các mức ngữ cảnh thử, lớn trước
+ANSWER_MAX_TOKENS = 8192  # trần token (suy nghĩ + trả lời) khi trả lời từ tài liệu; chạm trần mà chưa trả lời thì hỏi lại không suy nghĩ
+_ctx_checked: set[tuple[str, int]] = set()  # (model, ngữ cảnh đang nạp) đã xét nạp lại, khỏi ước lượng mỗi câu hỏi
+
+
+async def _estimate_gb(model: str, ctx: int) -> float | None:
+    """VRAM (GiB) LM Studio ước lượng cần để nạp model với ngữ cảnh ctx (lms load --estimate-only, không nạp thật)."""
+    def call() -> str:  # lms in phần ước lượng ra stderr, nên đọc cả hai luồng
+        r = subprocess.run([_lms_exe(), "load", model, "-y", "-c", str(ctx), "--estimate-only"], capture_output=True,
+                           text=True, timeout=60, encoding="utf-8", errors="replace", creationflags=_NO_WINDOW)
+        return (r.stdout or "") + (r.stderr or "")
+
+    try:
+        out = await asyncio.to_thread(call)
+    except (OSError, RuntimeError, subprocess.SubprocessError):
+        return None
+    out = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", out)  # bỏ mã màu ANSI (lms tô màu con số khi chạy từ server)
+    m = re.search(r"Estimated GPU Memory:\s*([\d.]+)\s*GiB", out)
+    return float(m.group(1)) if m else None
+
+
+async def _best_ctx(model: str, max_ctx: int, held_gb: float = 0.0) -> int:
+    """Ngữ cảnh lớn nhất (trong CTX_STEPS) mà VRAM còn trống chứa được. held_gb: VRAM model này đang chiếm
+    (sẽ được trả lại khi nạp lại). Ngữ cảnh lớn để model suy nghĩ (Qwen, gpt-oss…) đọc nhiều tài liệu mà không
+    hết chỗ; máy VRAM nhỏ thì giữ mức nhỏ để không tràn sang RAM."""
+    info = await asyncio.to_thread(gpu_info)
+    total, used = info.get("vram_total_mb"), info.get("vram_used_mb")
+    if not total or used is None:
+        return min(CTX_WANT, max_ctx)
+    free = (total - used) / 1024 + held_gb - 1.5  # chừa 1,5 GB cho giao diện, model embedding…
+    known = False
+    for c in CTX_STEPS:
+        if c > max_ctx:
+            continue
+        est = await _estimate_gb(model, c)
+        known = known or est is not None
+        if est is not None and est <= free:
+            return c
+    # không ước lượng được (lms cũ không có --estimate-only…) thì giữ mức mặc định như trước
+    return min(CTX_STEPS[-1] if known else CTX_WANT, max_ctx)
+
+
 async def _prepare_model(model: str) -> int:
-    """Bảo đảm model chat đã nạp; trả về độ dài ngữ cảnh (token) đang dùng."""
+    """Bảo đảm model chat đã nạp với ngữ cảnh đủ lớn theo VRAM; trả về độ dài ngữ cảnh (token) đang dùng."""
     lm = LMStudio(LM_URL)
     try:
         models = await lm.list_models()
         info = next((m for m in models if m["id"] == model), None)
         if info is None:
             raise RuntimeError(f"LM Studio không có model {model}")
+        max_ctx = int(info.get("max_context_length") or CTX_WANT)
         if info.get("state") != "loaded":
             for m in models:  # gỡ model chat khác để nhường VRAM, giữ lại model embedding
                 if m.get("state") == "loaded" and m.get("type") != "embeddings":
                     await _lms("unload", m["id"], timeout=120)
-            ctx = min(CTX_WANT, info.get("max_context_length") or CTX_WANT)
-            await _lms("load", model, "-y", "-c", str(ctx))
-            info = next((m for m in await lm.list_models() if m["id"] == model), info)
+            await _lms("load", model, "-y", "-c", str(await _best_ctx(model, max_ctx)))
+        else:
+            # Đã nạp sẵn (tự nạp hoặc người dùng nạp) với ngữ cảnh nhỏ: nếu VRAM còn dư thì nạp lại với ngữ cảnh lớn hơn.
+            cur = int(info.get("loaded_context_length") or 4096)
+            if cur < CTX_STEPS[0] and (model, cur) not in _ctx_checked:
+                _ctx_checked.add((model, cur))
+                want = await _best_ctx(model, max_ctx, await _estimate_gb(model, cur) or 0.0)
+                if want > cur:
+                    await _lms("unload", model, timeout=120)
+                    await _lms("load", model, "-y", "-c", str(want))
+        info = next((m for m in await lm.list_models() if m["id"] == model), info)
         return int(info.get("loaded_context_length") or 4096)
     finally:
         await lm.close()
@@ -326,11 +382,12 @@ def _catalog(limit: int = 30) -> str:
     return " (gồm: " + "; ".join(short) + more + ")"
 
 
-async def _route(model: str, history: list[dict[str, Any]], question: str, use_docs: bool, use_web: bool) -> tuple[str, str]:
-    """Phân loại tin nhắn: ("chat", "") nếu không cần tra cứu, ("search", câu tìm kiếm đã viết lại) nếu cần.
+async def _route(model: str, history: list[dict[str, Any]], question: str, use_docs: bool, use_web: bool) -> tuple[str, str, str]:
+    """Phân loại tin nhắn: ("chat", "", "") nếu không cần tra cứu; ("search", câu tìm kiếm đã viết lại, câu đó bằng
+    tiếng Anh) nếu cần — tài liệu kỹ thuật thường viết tiếng Anh nên tìm bằng cả hai ngôn ngữ.
     Câu xã giao rõ ràng nhận ra ngay; còn lại hỏi nhanh model đang dùng. Lỗi hay trả lời lạ thì coi như cần tra cứu."""
     if SMALLTALK.match(question):
-        return "chat", ""
+        return "chat", "", ""
     sources = " và ".join(x for x, on in (("tài liệu nội bộ", use_docs), ("internet", use_web)) if on)
     convo = "\n".join(f"{'Người dùng' if m['role'] == 'user' else 'Trợ lý'}: {m['content'][:600]}" for m in history[-4:])
     payload = {"model": model, "temperature": 0, "max_tokens": 600, "reasoning_effort": "none", "stream": False,
@@ -343,10 +400,10 @@ async def _route(model: str, history: list[dict[str, Any]], question: str, use_d
         m = re.search(r"\{.*\}", text, re.S)
         obj = json.loads(m.group()) if m else {}
     except Exception:  # noqa: BLE001
-        return "search", ""
+        return "search", "", ""
     if str(obj.get("action", "")).lower() == "chat":
-        return "chat", ""
-    return "search", str(obj.get("query") or "").strip()
+        return "chat", "", ""
+    return "search", str(obj.get("query") or "").strip(), str(obj.get("query_en") or "").strip()
 
 
 @router.post("/ask")
@@ -368,12 +425,15 @@ async def ask(body: dict[str, Any]) -> StreamingResponse:
             history, question = msgs[-7:-1], msgs[-1]["content"]
             prev = next((m["content"] for m in reversed(history) if m["role"] == "user"), "")
             used = sum(len(m["content"]) for m in history) + len(question)
-            budget = max(1500, min(40000, int((ctx - 1500) * 2.2) - used))
+            # Chừa khoảng 1/3 ngữ cảnh cho phần model suy nghĩ + trả lời (model suy nghĩ như Qwen, gpt-oss dùng cả nghìn token
+            # trước khi viết chữ đầu tiên); ~2 ký tự / token (tiếng Việt có dấu và bảng số liệu tốn token hơn văn tiếng Anh).
+            reserve = min(8192, max(3000, ctx // 3))
+            budget = max(1500, min(40000, int((ctx - reserve - 1000) * 2.0) - used))
             passages: list[dict[str, Any]] = []
-            action, query = "plain", ""  # plain: người dùng tắt cả tài liệu lẫn internet
+            action, query, query_en = "plain", "", ""  # plain: người dùng tắt cả tài liệu lẫn internet
             if use_docs or use_web:
                 yield ev(type="status", text="Đang hiểu câu hỏi…")
-                action, query = await _route(model, history, question, use_docs, use_web)
+                action, query, query_en = await _route(model, history, question, use_docs, use_web)
                 yield ev(type="route", mode=action, query=query)
             chatting = action == "chat"
             docs_on, web_on = use_docs and not chatting, use_web and not chatting
@@ -384,54 +444,91 @@ async def ask(body: dict[str, Any]) -> StreamingResponse:
                 yield ev(type="status", text="Đang tìm tài liệu liên quan…")
                 await _prepare_embed(ix.model)
                 # câu tìm kiếm đã được viết lại cho đủ ý; không có thì ghép câu trước để hiểu câu hỏi nối tiếp
-                q = f"{query}\n{question}" if query else f"{prev}\n{question}".strip()
-                found = await rag.retrieve(ix, q, budget * 6 // 10 if web_on else budget)
+                doc_queries = [f"{query}\n{question}" if query else f"{prev}\n{question}".strip(), query_en]
+                found = await rag.retrieve(ix, doc_queries, budget * 6 // 10 if web_on else budget)
                 passages += [{"kind": "doc", "doc": c["doc"], "i": c["i"], "loc": c.get("loc"), "text": c["text"]} for c in found]
             if web_on:
                 yield ev(type="status", text="Đang tìm kiếm trên internet…")
                 q = query or (question if len(question) > 25 or not prev else f"{prev} {question}")
                 passages += await _web_passages(q, budget - sum(len(x["text"]) for x in passages))
-            for n, x in enumerate(passages, 1):
-                x["n"] = n
-            yield ev(type="sources", ctx=ctx, sources=[{k: v for k, v in x.items() if k != "text" or x["kind"] == "web"} for x in passages])
-
-            content, system = question, SYSTEM_PLAIN
-            if chatting:  # trò chuyện: không đưa nguồn, để model đáp tự nhiên
-                system = SYSTEM_CHAT.format(docs=_catalog(12) if use_docs else "", web=", tìm kiếm trên internet" if use_web else "")
-            elif docs_on or web_on:
-                blocks = []
+            def build(passages: list[dict[str, Any]]) -> tuple[str, str]:
+                """Tin nhắn gửi model: nguồn đánh số, gom theo tài liệu (tên tài liệu ghi 1 lần, mỗi đoạn chỉ ghi trang/mục)."""
+                if chatting:  # trò chuyện: không đưa nguồn, để model đáp tự nhiên
+                    return question, SYSTEM_CHAT.format(docs=_catalog(12) if use_docs else "",
+                                                        web=", tìm kiếm trên internet" if use_web else "")
+                if not (docs_on or web_on):
+                    return question, SYSTEM_PLAIN
+                blocks, last = [], None
                 for x in passages:
                     if x["kind"] == "doc":
+                        if x["doc"] != last:
+                            blocks.append(f"=== Tài liệu: {x['doc']} ===")
+                            last = x["doc"]
                         where = rag.loc_text(x["loc"])
-                        blocks.append(f"[{x['n']}] Tài liệu: {x['doc']}{' — ' + where if where else ''}\n{x['text']}")
+                        blocks.append(f"[{x['n']}]{' (' + where + ')' if where else ''}\n{x['text']}")
                     else:
+                        last = None
                         blocks.append(f"[{x['n']}] Trang web: {x['title']} ({x['url']})\n{x['text']}")
                 content = "NGUỒN THAM KHẢO:\n" + ("\n\n".join(blocks) or "(không tìm thấy nguồn nào)") + f"\n\nCÂU HỎI: {question}"
-                system = SYSTEM + (f" Hôm nay là ngày {time.strftime('%d/%m/%Y')}." if use_web else "")
-            payload = {"model": model, "stream": True, "temperature": 0.6 if chatting else 0.2, "max_tokens": -1, "stream_options": {"include_usage": True},
-                       "messages": [{"role": "system", "content": system + FORMAT}, *history, {"role": "user", "content": content}]}
-            if chatting:  # trò chuyện không cần model suy nghĩ lâu: trả lời ngay
-                payload["reasoning_effort"] = "none"
-            t0, tokens, thinking = time.perf_counter(), 0, False
-            async with httpx.AsyncClient(timeout=httpx.Timeout(600, connect=5)) as http, \
-                    http.stream("POST", f"{LM_URL}/v1/chat/completions", json=payload) as r:
-                if r.status_code != 200:
-                    raise RuntimeError(f"LM Studio trả lỗi {r.status_code}: {(await r.aread()).decode('utf-8', 'replace')[:300]}")
-                async for line in r.aiter_lines():
-                    if not line.startswith("data:") or line[5:].strip() == "[DONE]":
-                        continue
-                    obj = json.loads(line[5:])
-                    if obj.get("error"):
-                        raise RuntimeError(f"LM Studio báo lỗi: {obj['error']}")
-                    if obj.get("usage"):
-                        tokens = obj["usage"].get("completion_tokens", 0)
-                    for ch in obj.get("choices") or []:
-                        d = ch.get("delta") or {}
-                        if d.get("content"):
-                            yield ev(type="text", text=d["content"])
-                        elif (d.get("reasoning_content") or d.get("reasoning")) and not thinking:
-                            thinking = True
-                            yield ev(type="status", text="Model đang suy nghĩ…")
+                return content, SYSTEM + (f" Hôm nay là ngày {time.strftime('%d/%m/%Y')}." if use_web else "")
+
+            t0, tokens, think_off = time.perf_counter(), 0, False
+            for attempt in range(2):
+                for n, x in enumerate(passages, 1):
+                    x["n"] = n
+                yield ev(type="sources", ctx=ctx, sources=[{k: v for k, v in x.items() if k != "text" or x["kind"] == "web"} for x in passages])
+                content, system = build(passages)
+                payload = {"model": model, "stream": True, "temperature": 0.6 if chatting else 0.2, "max_tokens": -1,
+                           "stream_options": {"include_usage": True},
+                           "messages": [{"role": "system", "content": system + FORMAT}, *history, {"role": "user", "content": content}]}
+                if chatting or think_off:  # trò chuyện / lần hỏi lại: không cho model suy nghĩ lâu, trả lời ngay
+                    payload["reasoning_effort"] = "none"
+                elif docs_on or web_on:  # giới hạn suy nghĩ + trả lời (~1 phút): model không bị kẹt suy nghĩ cả chục nghìn token
+                    payload["max_tokens"] = ANSWER_MAX_TOKENS
+                thinking, wrote, finish, used_ctx = False, False, None, 0
+                async with httpx.AsyncClient(timeout=httpx.Timeout(600, connect=5)) as http, \
+                        http.stream("POST", f"{LM_URL}/v1/chat/completions", json=payload) as r:
+                    if r.status_code != 200:
+                        raise RuntimeError(f"LM Studio trả lỗi {r.status_code}: {(await r.aread()).decode('utf-8', 'replace')[:300]}")
+                    async for line in r.aiter_lines():
+                        if not line.startswith("data:") or line[5:].strip() == "[DONE]":
+                            continue
+                        obj = json.loads(line[5:])
+                        if obj.get("error"):
+                            raise RuntimeError(f"LM Studio báo lỗi: {obj['error']}")
+                        if obj.get("usage"):
+                            tokens = obj["usage"].get("completion_tokens", 0)
+                            used_ctx = obj["usage"].get("total_tokens", 0)
+                        for ch in obj.get("choices") or []:
+                            finish = ch.get("finish_reason") or finish
+                            d = ch.get("delta") or {}
+                            if d.get("content"):
+                                wrote = True
+                                yield ev(type="text", text=d["content"])
+                            elif (d.get("reasoning_content") or d.get("reasoning")) and not thinking:
+                                thinking = True
+                                yield ev(type="status", text="Model đang suy nghĩ…")
+                if wrote:
+                    break
+                # Model không viết chữ nào: suy nghĩ chạm giới hạn token, hết ngữ cảnh, hoặc suy nghĩ xong mà không trả lời
+                # (câu hỏi rộng làm model suy nghĩ rất dài). Hỏi lại 1 lần với chế độ suy nghĩ TẮT; nếu là hết ngữ cảnh
+                # thì giảm nửa số đoạn tài liệu.
+                overflow = finish == "length" and used_ctx >= ctx - 256
+                if attempt == 0:
+                    yield ev(type="status", text="Tài liệu dài quá ngữ cảnh, đang thử lại với ít đoạn hơn…" if overflow
+                             else "Model suy nghĩ quá lâu, đang hỏi lại để trả lời trực tiếp…")
+                    if overflow and docs_on and passages:
+                        half = sum(len(x["text"]) for x in passages) // 2
+                        web = [x for x in passages if x["kind"] == "web"]
+                        found = await rag.retrieve(ix, doc_queries, max(1500, half - sum(len(x["text"]) for x in web)))
+                        passages = [{"kind": "doc", "doc": c["doc"], "i": c["i"], "loc": c.get("loc"), "text": c["text"]} for c in found] + web
+                    think_off = True
+                    continue
+                if not overflow:
+                    raise RuntimeError("Model trả lời rỗng")
+                raise RuntimeError(f"Model dùng hết ngữ cảnh ({ctx} token) khi đang suy nghĩ nên chưa kịp trả lời. "
+                                   "Hãy gỡ bớt model khác để có thêm VRAM (app sẽ tự nạp lại với ngữ cảnh lớn hơn), "
+                                   "hoặc chọn model không có chế độ suy nghĩ.")
             total = time.perf_counter() - t0
             yield ev(type="done", seconds=round(total, 1), tokens=tokens, tps=round(tokens / total, 1) if total > 0 else 0)
         except Exception as e:  # noqa: BLE001

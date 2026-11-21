@@ -13,4 +13,5 @@ dependencies = [
     "numpy>=2.4.6",
     "ddgs>=9.16.1",
     "pypdfium2>=5.15.2",
+    "rapidocr-onnxruntime>=1.4.4",
 ]

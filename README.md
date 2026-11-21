@@ -162,10 +162,21 @@ Mỗi câu hỏi đi qua hai bước: tìm các đoạn gần câu hỏi nhất 
 tính vào), rồi đưa cho AI **đọc trọn tài liệu đó**; tài liệu dài quá ngữ cảnh thì chỉ đưa các đoạn liên quan kèm đoạn liền kề.
 Dưới mỗi câu trả lời có tên tài liệu AI đã đọc, bấm vào để mở file.
 
+**Lịch sử trò chuyện.** Mỗi câu trả lời xong, cả cuộc trò chuyện được tự lưu (kèm nguồn trích dẫn) vào `chat_history/chats.db`
+trên máy này (không đưa lên GitHub). Cột "Lịch sử trò chuyện" trong khung chat liệt kê các cuộc trò chuyện theo Hôm nay / Hôm qua /
+7 ngày qua / Cũ hơn; bấm vào để xem lại và chat tiếp (AI vẫn hiểu các câu trước), bấm vào trích dẫn vẫn mở được trang tài liệu.
+Ô tìm kiếm tìm cả trong tên lẫn nội dung; ✎ đổi tên, 🗑 xóa. Tên tự đặt theo câu hỏi thật đầu tiên (bỏ qua câu chào). Mở lại app
+thì cuộc trò chuyện đang dở được mở lại; nút ☰ ẩn / hiện cột lịch sử.
+
 **Trò chuyện tự nhiên.** Trước khi tra cứu, chatbot phân loại tin nhắn: câu chào hỏi, cảm ơn, hỏi "bạn làm được gì", hay yêu cầu
 tóm tắt / dịch / lập bảng từ câu trả lời trước thì đáp lại ngay như trò chuyện bình thường, không tra tài liệu (dưới câu trả lời ghi
 "💬 Trò chuyện"). Câu xã giao rõ ràng được nhận ra tức thì; câu khác do chính model trả lời phân loại (khoảng 2–3 giây), đồng thời viết lại
 câu hỏi nối tiếp như "còn thai sản thì sao?" thành câu tìm kiếm đầy đủ để tìm đúng tài liệu. Khi phân vân, chatbot chọn tra tài liệu.
+
+**Tìm bằng hai ngôn ngữ.** Tài liệu kỹ thuật (datasheet, tiêu chuẩn, bản vẽ) thường viết tiếng Anh, còn người dùng hỏi tiếng Việt.
+Câu tìm kiếm được dịch thêm sang tiếng Anh theo thuật ngữ kỹ thuật ("áp suất… chế độ bình thường" → "pressure… normal condition"),
+giữ nguyên mã thiết bị và con số; mỗi câu tự xếp hạng tài liệu rồi trộn thứ hạng, nên datasheet tiếng Anh không bị các tài liệu tiếng Việt
+cùng chủ đề (cùng mã máy) lấn át, và ngược lại.
 
 **Trích dẫn nguồn.** Mỗi ý trong câu trả lời có số nguồn dạng `[2]`. Dưới câu trả lời liệt kê từng nguồn kèm vị trí:
 trang (PDF), mục theo tiêu đề (Word, Markdown), sheet (Excel). Bấm vào số hoặc dòng nguồn để mở khung xem tài liệu.
@@ -174,8 +185,13 @@ Nút "Mở file gốc" mở file bằng ứng dụng mặc định.
 - **PDF và file ảnh** mở ở tab **📄 Trang gốc**: hiện đúng trang AI đã dùng như bản in, chỗ AI lấy thông tin được **tô vàng**
   ngay trên trang. Thanh trên cùng có nút chuyển trang, ô nhập số trang và các nút nhảy nhanh tới những trang AI đã dùng.
   - PDF có chữ: vị trí tô lấy chính xác từ lớp chữ của PDF.
-  - Trang scan / ảnh: model OCR (vd. chandra-ocr) cho khung của từng khối chữ, app dò thêm trên ảnh để tìm đúng hàng bảng
-    hoặc dòng chữ (bám theo cả trang scan hơi nghiêng). Đây là vị trí ước lượng; model OCR không trả tọa độ thì không tô được trên ảnh.
+  - Trang scan / ảnh: app dùng **RapidOCR** (chạy trên CPU, cài sẵn cùng app) dò vị trí từng ô chữ ngay trên ảnh trang, rồi tô
+    đúng các ô khớp câu trả lời (vd. "Pressure / bar A / 26.5 / 41.4 / 129.5"). Cách này dùng được với mọi model OCR (cả Qwen-VL vốn
+    không trả tọa độ). Mỗi trang dò 1 lần (~3–6 giây lần mở đầu), kết quả lưu trong `rag_index/index.db`. Chữ in quá mờ mà RapidOCR
+    đọc không ra thì app dùng khung khối chữ của chandra-ocr (nếu trang từng được OCR bằng model này), dò thêm trên ảnh để tìm hàng
+    bảng / dòng chữ.
+  - Tô theo độ phủ: dòng khớp nhất trước, rồi thêm các dòng mang thêm số liệu / từ mới của câu trả lời (vd. hàng tiêu đề điều kiện
+    và các hàng áp suất), không tô các hàng na ná nhau.
 - Tab **📝 Văn bản** (và Word, Excel, Markdown, txt): hiện chữ đã trích của cả tài liệu, đoạn được trích dẫn có nền vàng,
   dòng khớp với câu trả lời được tô đậm hơn.
 
@@ -186,12 +202,38 @@ thì giao diện vẽ biểu đồ, nút **Xuất Excel (kèm biểu đồ)** t�
 AI đọc vài trang kết quả đầu và trả lời kèm link nguồn. Mặc định tắt vì câu hỏi sẽ rời khỏi máy. Nguồn tìm kiếm miễn phí có lúc
 không phản hồi; khi đó hỏi lại sau ít giây. Có thể bật cùng lúc với tra cứu tài liệu.
 
+**Chọn model theo VRAM.** Đầu thẻ Chatbot có ô **💡 Gợi ý cho máy này**: app đọc VRAM của GPU và dung lượng các model đã tải,
+đề xuất bộ ba model trả lời / lập chỉ mục / OCR hợp nhất, nút **Dùng gợi ý này** chọn cả ba một lần. Trong ba ô chọn model, mỗi
+model có nhãn ✓ vừa máy / △ vừa sát VRAM / ✗ quá lớn. Model trả lời và model lập chỉ mục chạy **cùng lúc** khi hỏi đáp nên được
+tính chung VRAM (ngữ cảnh 16K + 4K); model OCR chạy **một mình** (app gỡ các model khác khi OCR). Thiếu model nên có thì ô gợi ý
+nhắc tải trong LM Studio. Bảng tham khảo (bản nén Q4, tính cả bộ nhớ ngữ cảnh):
+
+| VRAM | Model trả lời | Model lập chỉ mục | Model OCR | Ngữ cảnh tự chọn |
+|---|---|---|---|---|
+| 8 GB | Gemma 4 E4B (~6,3 GB) | Qwen3-Embedding-0.6B (~0,6 GB)¹ | chandra-ocr-2 (~3,6 GB) | 8K |
+| 12 GB | Gemma 4 12B QAT (~7,2 GB) | Qwen3-Embedding-0.6B¹ | chandra-ocr-2 | 16K |
+| 16 GB | Gemma 4 12B QAT | Qwen3 Embedding 8B (~4,7 GB) | chandra-ocr-2 | 16K |
+| 24 GB | gpt-oss-20b (~12 GB) | Qwen3 Embedding 8B | chandra-ocr-2 | 16–32K |
+| 32 GB | Gemma 4 31B (~20 GB) hoặc Qwen3.8 27B (~18 GB) | Qwen3 Embedding 8B | chandra-ocr-2 | 32K |
+| 48–64 GB | Gemma 4 31B / Qwen3.8 27B | Qwen3 Embedding 8B | chandra-ocr-2 | 64K |
+| 96 GB | gpt-oss-120b (~63 GB) | Qwen3 Embedding 8B | chandra-ocr-2 | 64K |
+
+¹ Máy 8–12 GB không chứa nổi Qwen3 Embedding 8B cùng model trả lời. `nomic-embed` / `all-MiniLM` nhỏ nhưng yếu tiếng Việt, nên
+tải Qwen3-Embedding-0.6B (đa ngôn ngữ). Đổi model lập chỉ mục thì phải bấm "Cập nhật chỉ mục" một lần (kết quả OCR được giữ, không
+phải OCR lại), nên chọn đúng từ đầu. Dung lượng là của bản tải trong LM Studio, có thể chênh tùy bản nén.
+
 Lưu ý:
 - Ô "Model lập chỉ mục" liệt kê mọi model trong LM Studio. Nhóm trên dùng được ngay; model ở nhóm dưới bị LM Studio xếp
   là model chat, muốn dùng thì trong LM Studio mở My Models → ⚙ của model → "Override Domain Type" → "Embedding".
 - Model embedding quyết định việc tìm đúng tài liệu. Với tiếng Việt nên dùng model đa ngôn ngữ (Qwen3 Embedding, bge-m3); `nomic-embed` yếu hơn.
-- PDF scan (chỉ có ảnh) không đọc được, trong danh sách sẽ hiện dấu ⚠.
-- Khi chatbot tự nạp model, nó nạp model trả lời với ngữ cảnh 16.384 token và model embedding với 4.096 token. Model đã nạp sẵn thì giữ nguyên ngữ cảnh đang có.
+- PDF scan (chỉ có ảnh) cần chọn model OCR khi lập chỉ mục; chưa OCR thì trong danh sách hiện dấu ⚠.
+- Ngữ cảnh của model trả lời được chọn theo VRAM còn trống: app hỏi LM Studio ước lượng VRAM (`lms load --estimate-only`) rồi lấy
+  mức lớn nhất vừa máy trong 65.536 / 32.768 / 16.384 / 8.192 token (vd. Qwen3.8 27B: 26 GB ở 64K trên card 96 GB; card 16 GB thì
+  giữ mức nhỏ để không tràn sang RAM). Model đã nạp sẵn với ngữ cảnh nhỏ mà VRAM còn dư thì được nạp lại một lần (~30 giây).
+  Model embedding nạp với 4.096 token.
+- Model có chế độ suy nghĩ (Qwen, gpt-oss…) gặp câu hỏi rộng có thể suy nghĩ hàng chục nghìn token. Khi trả lời từ tài liệu, phần
+  suy nghĩ + trả lời bị giới hạn 8.192 token; chạm giới hạn hoặc hết ngữ cảnh mà chưa trả lời thì app tự hỏi lại với chế độ suy nghĩ
+  tắt (hết ngữ cảnh thì giảm nửa số đoạn tài liệu).
 - Nút **Gỡ các model đã nạp** giải phóng VRAM; model cần dùng sẽ tự nạp lại ở câu hỏi kế tiếp. Nên bấm nút này khi model đã được nạp sẵn
   từ nơi khác với ngữ cảnh lớn (ví dụ Qwen3 Embedding 8B tự nạp với 40.960 token chiếm hơn 10 GB VRAM).
 - AI vẫn có thể trả lời sai; tên tài liệu nguồn là để người dùng kiểm tra lại.

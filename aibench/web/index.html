@@ -241,8 +241,47 @@
   /* ----- Chatbot ----- */
   #chatView { position: relative; z-index: 1; display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 16px; padding: 16px 24px; max-width: 1500px; margin: 0 auto; }
   @media (max-width: 900px) { #chatView { grid-template-columns: minmax(0, 1fr); padding: 16px; } }
-  .chatcard { display: flex; flex-direction: column; height: calc(100vh - 120px); min-height: 420px; }
+  /* Gợi ý model theo VRAM */
+  .sugg { margin: 0 0 12px; padding: 8px 10px; border: 1px solid var(--accent); border-radius: 10px; background: var(--soft); font-size: 13px; }
+  .sugg summary { cursor: pointer; font-weight: 700; color: var(--accent); }
+  .sugg[open] summary { margin-bottom: 6px; }
+  .sgrow { display: flex; gap: 6px; align-items: baseline; padding: 2px 0; }
+  .sgrow span { color: var(--muted); min-width: 92px; }
+  .sgrow b { flex: 1; min-width: 0; word-break: break-all; }
+  .sgrow em { font-style: normal; color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .sgtip { margin-top: 6px; color: var(--warn); font-size: 12.5px; }
+  .sgsame { margin-top: 6px; color: var(--ok); font-weight: 600; }
+  .sugg button { margin-top: 8px; width: 100%; }
+  .chatcard { display: flex; gap: 14px; height: calc(100vh - 120px); min-height: 420px; }
+  .chatmain { flex: 1; min-width: 0; display: flex; flex-direction: column; }
   #chatLog { flex: 1; overflow: auto; padding-right: 4px; }
+  /* Lịch sử hội thoại */
+  .convpane { width: 250px; flex: 0 0 250px; display: flex; flex-direction: column; gap: 8px; padding-right: 14px; border-right: 1px solid var(--line); min-height: 0; }
+  .chatcard.noconv .convpane { display: none; }
+  .convhead { display: flex; align-items: center; gap: 8px; }
+  .convhead b { flex: 1; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--accent); }
+  .convhead button { padding: 5px 10px; font-size: 12.5px; }
+  #convSearch { margin: 0; padding: 6px 9px; font-size: 13px; }
+  #convList { flex: 1; overflow: auto; margin-right: -6px; padding-right: 6px; }
+  .convgrp { margin: 10px 2px 4px; font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  .conv { position: relative; padding: 7px 9px; border-radius: 8px; cursor: pointer; border: 1px solid transparent; }
+  .conv:hover { background: var(--field); }
+  .conv.on { background: var(--soft); border-color: var(--accent); }
+  .conv .ct { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 46px; }
+  .conv .cm { font-size: 11.5px; color: var(--muted); }
+  .conv .ca { position: absolute; right: 4px; top: 6px; display: none; gap: 2px; }
+  .conv:hover .ca, .conv.on .ca { display: flex; }
+  .conv .ca button { padding: 1px 5px; font-size: 12px; border: 0; background: transparent; color: var(--muted); }
+  .conv .ca button:hover { color: var(--accent); }
+  .conv .ca button.del:hover { color: var(--bad); }
+  .convempty { color: var(--muted); font-size: 12.5px; padding: 8px 2px; }
+  .chathead { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; min-height: 30px; }
+  .chathead b { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 14px; }
+  .chathead .icon { padding: 3px 9px; }
+  @media (max-width: 1100px) {
+    .chatcard { flex-direction: column; }
+    .convpane { width: auto; flex: 0 0 auto; max-height: 220px; padding: 0 0 10px; border-right: 0; border-bottom: 1px solid var(--line); }
+  }
   .msg { max-width: 86%; margin: 0 0 12px; padding: 10px 13px; border-radius: 12px; white-space: pre-wrap; word-break: break-word; }
   .msg.user { margin-left: auto; background: var(--accent); color: var(--accent-text); border-bottom-right-radius: 3px; }
   .msg.bot { background: var(--field); border: 1px solid var(--line); border-bottom-left-radius: 3px; }
@@ -378,6 +417,7 @@
   <div>
     <div class="card">
       <h2 data-i18n="chatSetup"></h2>
+      <details class="sugg" id="chatSugg" hidden></details>
       <label for="chatModel" style="margin-top:0" data-i18n="chatModel"></label>
       <select id="chatModel"></select>
       <div class="help" id="loadedInfo" style="margin-top:6px"></div>
@@ -406,11 +446,18 @@
     </div>
   </div>
   <div class="card chatcard">
-    <div id="chatLog"></div>
-    <div class="chatin">
-      <textarea id="chatInput" rows="2"></textarea>
-      <button class="primary" id="chatSend" data-i18n="chatSend"></button>
-      <button id="chatNew" data-i18n="chatNew"></button>
+    <aside class="convpane" id="convPane">
+      <div class="convhead"><b data-i18n="convTitle"></b><button class="primary" id="chatNew" data-i18n="chatNew"></button></div>
+      <input type="search" id="convSearch" data-i18n-ph="convSearch">
+      <div id="convList"></div>
+    </aside>
+    <div class="chatmain">
+      <div class="chathead"><button class="icon" id="convToggle" data-i18n-title="convToggle">☰</button><b id="convName"></b></div>
+      <div id="chatLog"></div>
+      <div class="chatin">
+        <textarea id="chatInput" rows="2"></textarea>
+        <button class="primary" id="chatSend" data-i18n="chatSend"></button>
+      </div>
     </div>
   </div>
 </section>
@@ -476,11 +523,25 @@ const T = {
     pgMarks: n => `${n} chỗ được tô vàng`,
     chatSetup: "Chatbot", chatModel: "Model trả lời", chatUseDocs: "Tra cứu tài liệu trước khi trả lời",
     chatUseDocsHelp: "Bật: AI chỉ trả lời theo tài liệu trong thư mục bên dưới. Tắt: chat tự do với model.",
+    sgOk: "  ✓ vừa máy", sgTight: "  △ vừa sát VRAM", sgNo: "  ✗ quá lớn với máy này",
+    sgTitle: v => `💡 Gợi ý cho máy này (GPU ${v} GB VRAM)`, sgChat: "Trả lời", sgEmb: "Lập chỉ mục", sgOcr: "OCR",
+    sgNote: "Chọn trong các model đã tải. Model trả lời và model lập chỉ mục chạy cùng lúc nên được tính chung VRAM; model OCR chạy riêng. Ngữ cảnh tự chọn theo VRAM khi hỏi.",
+    sgNeedChat: "Chưa có model trả lời nào vừa máy. Hãy tải một model nhỏ trong LM Studio, vd. Gemma 4 E4B (~6 GB).",
+    sgNeedEmb: "Nên tải thêm Qwen3-Embedding-0.6B (~0,6 GB, đa ngôn ngữ) trong LM Studio: tìm tài liệu tiếng Việt tốt hơn hẳn nomic / all-MiniLM.",
+    sgNeedOcr: "Nên tải chandra-ocr-2 (~3,6 GB) trong LM Studio để đọc PDF scan và tô vàng đúng vị trí trên trang.",
+    sgSame: "✓ Đang dùng đúng bộ model gợi ý", sgApply: "Dùng gợi ý này",
+    sgReindex: "Model lập chỉ mục khác với chỉ mục hiện có: sau khi dùng gợi ý, bấm \"Cập nhật chỉ mục\" (không phải OCR lại).",
     embedGroupOk: "Model embedding (dùng được ngay)", embedGroupOther: "Model khác (cần đổi loại trong LM Studio)",
     embedWarnT: "LM Studio đang xếp model này vào loại model chat",
     embedWarn: m => `Muốn dùng ${m} để lập chỉ mục, hãy đổi loại model trong LM Studio: mở tab My Models → bấm ⚙ (Edit model default config) ở dòng của model → mục "Override Domain Type" chọn "Embedding". Đổi xong, model tự chuyển lên nhóm "Model embedding" ở ô này (vài giây), rồi bấm "Cập nhật chỉ mục". Chỉ những model được huấn luyện để tạo embedding (tên thường có chữ "embed") mới cho kết quả tìm kiếm tốt.`,
     chatEmbed: "Model lập chỉ mục (embedding)", chatEmbedHelp: "Dùng để tìm tài liệu liên quan. Đổi model này thì phải lập lại chỉ mục.",
-    docsTitle: "Tài liệu", docsOpen: "Mở thư mục", docsIndex: "Cập nhật chỉ mục", chatSend: "Gửi", chatNew: "Cuộc trò chuyện mới",
+    docsTitle: "Tài liệu", docsOpen: "Mở thư mục", docsIndex: "Cập nhật chỉ mục", chatSend: "Gửi", chatNew: "＋ Mới",
+    convTitle: "Lịch sử trò chuyện", convSearch: "🔍 Tìm trong lịch sử…", convToggle: "Ẩn / hiện lịch sử trò chuyện",
+    convEmpty: "Chưa có cuộc trò chuyện nào. Đặt câu hỏi đầu tiên, cuộc trò chuyện sẽ được lưu tự động.",
+    convNone: "Không có cuộc trò chuyện nào khớp.", convNew: "Cuộc trò chuyện mới",
+    convToday: "Hôm nay", convYesterday: "Hôm qua", convWeek: "7 ngày qua", convOlder: "Cũ hơn",
+    convMsgs: n => `${n} tin nhắn`, convRename: "Đổi tên", convDelete: "Xóa", convRenameAsk: "Tên mới cho cuộc trò chuyện:",
+    convDeleteAsk: t => `Xóa cuộc trò chuyện "${t}"? Không khôi phục lại được.`, convBusy: "Đợi AI trả lời xong rồi hãy chuyển cuộc trò chuyện.",
     chatPlaceholder: "Nhập câu hỏi… (Enter để gửi, Shift+Enter để xuống dòng)",
     chatEmpty: "Hãy đặt câu hỏi về tài liệu trong thư mục. AI sẽ tìm tài liệu liên quan, đọc rồi trả lời kèm tên tài liệu nguồn.",
     docsDir: (d, ext) => `Bỏ tài liệu vào thư mục này, chia thư mục con tùy ý: ${d}\nLoại file đọc được: ${ext}`,
@@ -579,11 +640,25 @@ const T = {
     pgMarks: n => `${n} highlighted spot(s)`,
     chatSetup: "Chatbot", chatModel: "Answering model", chatUseDocs: "Look up documents before answering",
     chatUseDocsHelp: "On: the AI answers only from the documents in the folder below. Off: free chat with the model.",
+    sgOk: "  ✓ fits", sgTight: "  △ barely fits", sgNo: "  ✗ too large for this machine",
+    sgTitle: v => `💡 Suggested for this machine (GPU ${v} GB VRAM)`, sgChat: "Answering", sgEmb: "Indexing", sgOcr: "OCR",
+    sgNote: "Picked from the models you have. The answering and indexing models run together, so their VRAM is counted together; the OCR model runs alone. The context is sized to VRAM when you ask.",
+    sgNeedChat: "No answering model fits this machine. Download a small one in LM Studio, e.g. Gemma 4 E4B (~6 GB).",
+    sgNeedEmb: "Consider downloading Qwen3-Embedding-0.6B (~0.6 GB, multilingual) in LM Studio: much better for Vietnamese documents than nomic / all-MiniLM.",
+    sgNeedOcr: "Consider downloading chandra-ocr-2 (~3.6 GB) in LM Studio to read scanned PDFs and highlight the exact spot on the page.",
+    sgSame: "✓ Already using the suggested models", sgApply: "Use this suggestion",
+    sgReindex: "The indexing model differs from the current index: after applying, click \"Update index\" (no re-OCR needed).",
     embedGroupOk: "Embedding models (ready)", embedGroupOther: "Other models (type must be changed in LM Studio)",
     embedWarnT: "LM Studio classifies this model as a chat model",
     embedWarn: m => `To index with ${m}, change its type in LM Studio: open My Models → click ⚙ (Edit model default config) on the model's row → set "Override Domain Type" to "Embedding". The model then moves to the "Embedding models" group here within a few seconds; click "Update index". Only models trained to produce embeddings (usually with "embed" in the name) give good search results.`,
     chatEmbed: "Indexing (embedding) model", chatEmbedHelp: "Used to find the relevant documents. Changing it requires re-indexing.",
-    docsTitle: "Documents", docsOpen: "Open folder", docsIndex: "Update index", chatSend: "Send", chatNew: "New conversation",
+    docsTitle: "Documents", docsOpen: "Open folder", docsIndex: "Update index", chatSend: "Send", chatNew: "＋ New",
+    convTitle: "Chat history", convSearch: "🔍 Search history…", convToggle: "Show / hide chat history",
+    convEmpty: "No conversations yet. Ask your first question and the conversation is saved automatically.",
+    convNone: "No conversation matches.", convNew: "New conversation",
+    convToday: "Today", convYesterday: "Yesterday", convWeek: "Last 7 days", convOlder: "Older",
+    convMsgs: n => `${n} messages`, convRename: "Rename", convDelete: "Delete", convRenameAsk: "New name for the conversation:",
+    convDeleteAsk: t => `Delete the conversation "${t}"? This cannot be undone.`, convBusy: "Wait for the AI to finish answering before switching conversations.",
     chatPlaceholder: "Type a question… (Enter to send, Shift+Enter for a new line)",
     chatEmpty: "Ask about the documents in the folder. The AI finds the relevant documents, reads them and answers with the source names.",
     docsDir: (d, ext) => `Put documents in this folder, with any subfolders you like: ${d}\nReadable file types: ${ext}`,
@@ -643,6 +718,8 @@ const t = (k, ...a) => { const v = T[lang][k]; return typeof v === "function" ? 
 const D = {
   "Đang tìm kiếm trên internet…": "Searching the internet…",
   "Đang hiểu câu hỏi…": "Understanding the question…",
+  "Tài liệu dài quá ngữ cảnh, đang thử lại với ít đoạn hơn…": "Documents exceed the context, retrying with fewer passages…",
+  "Model suy nghĩ quá lâu, đang hỏi lại để trả lời trực tiếp…": "The model thought for too long, asking again for a direct answer…",
   "Đang lập chỉ mục tài liệu, hãy đợi xong hoặc bấm Dừng": "Documents are being indexed; wait or click Stop",
   "Đã dừng. Phần đã làm (trang đã OCR, tài liệu đã lưu) được giữ lại, bấm Cập nhật chỉ mục để làm tiếp.": "Stopped. Work done so far (OCR'd pages, stored documents) is kept; click Update index to continue.", "Tài liệu này chưa có trong chỉ mục": "This document is not in the index",
   "Không tìm được kết quả trên internet (nguồn tìm kiếm không phản hồi). Hãy thử lại sau ít giây.": "No internet results (the search source did not respond). Try again in a few seconds.",
@@ -731,6 +808,8 @@ const R = [
   [/model suy nghĩ lặp vòng \(sau (\d+) token\), hỏi lại với chế độ suy nghĩ tắt/, "the model got stuck in a thinking loop (after $1 tokens); asking again with thinking off"],
   [/Model lặp vòng, không trả lời xong/, "The model looped and never finished answering"],
   [/Model không trả lời \(hết giới hạn token\)/, "The model did not answer (token limit reached)"], [/Model trả lời rỗng/, "The model returned an empty answer"],
+  [/Model dùng hết ngữ cảnh \((\d+) token\) khi đang suy nghĩ nên chưa kịp trả lời\. Hãy gỡ bớt model khác để có thêm VRAM \(app sẽ tự nạp lại với ngữ cảnh lớn hơn\), hoặc chọn model không có chế độ suy nghĩ\./,
+   "The model used up its context ($1 tokens) while thinking, before it could answer. Unload other models to free VRAM (the app will reload with a larger context), or pick a model without thinking mode."],
   [/Câu trả lời bị cắt giữa chừng vì hết giới hạn token/, "The answer was cut off at the token limit"], [/JSON không đúng dạng/, "Malformed JSON"],
   [/Không mở được file này/, "This file cannot be opened"], [/LM Studio trả lỗi/, "LM Studio returned error"], [/LM Studio báo lỗi:/, "LM Studio reported an error:"],
 ];
@@ -1244,9 +1323,10 @@ function applyLang() {
   document.documentElement.lang = lang;
   document.querySelectorAll("[data-i18n]").forEach(el => { el.textContent = t(el.dataset.i18n); });
   document.querySelectorAll("[data-i18n-ph]").forEach(el => { el.placeholder = t(el.dataset.i18nPh); });
+  document.querySelectorAll("[data-i18n-title]").forEach(el => { el.title = t(el.dataset.i18nTitle); });
   $("langVi").classList.toggle("on", lang === "vi"); $("langEn").classList.toggle("on", lang === "en");
   $("logo").title = t("logoTip");
-  paintTools(); paintStatus(); paintDirs(); paintChat(); paintDocs();
+  paintTools(); paintStatus(); paintDirs(); paintChat(); paintDocs(); paintConvs(); paintConvName();
   if (mods.length) {
     const keep = formParams();  // giữ lại những gì người dùng đã nhập
     fillModules(); renderForm();
@@ -1374,12 +1454,86 @@ function setView(v) {
 }
 $("viewBench").onclick = () => setView("bench");
 $("viewChat").onclick = () => setView("chat");
+// ----- Model nào vừa máy này (Chatbot) -----
+// Model trả lời và model lập chỉ mục chạy CÙNG LÚC khi hỏi đáp nên VRAM phải chứa cả hai; model OCR chạy một mình
+// (app gỡ các model khác khi OCR). Bộ nhớ ước lượng như phần Benchmark: file model +5% +0,3 GB, cộng bộ nhớ ngữ cảnh.
+const SG_CHAT_CTX = 16384, SG_EMB_CTX = 4096, SG_OCR_CTX = 16384;
+const vramGb = () => lastGpu && lastGpu.vram_total_mb ? lastGpu.vram_total_mb / 1024 : 0;
+const memGb = (m, ctx) => { if (!m || !m.size_bytes) return 0; const s = m.size_bytes / 2 ** 30; return s * 1.05 + 0.3 + s * 2.3 * ctx / 1048576; };
+const fitLevel = need => { const v = vramGb(); return !v || !need ? "" : need <= v - 1.5 ? "ok" : need <= v - 0.3 ? "tight" : "no"; };
+const byId = id => models.find(m => m.id === id);
+// Model trả lời tốt hơn khi lớn hơn; bỏ model embedding / OCR. Model lập chỉ mục: ưu tiên loại đa ngôn ngữ (tiếng Việt).
+const isChatCand = m => m.type !== "embeddings" && !/embed|ocr|chandra/i.test(m.id);
+const embRank = m => /qwen3[-_]?embedding/i.test(m.id) ? 0 : /bge-m3|multilingual|\be5\b|e5-|gte-multi|jina-embeddings-v3|granite-embedding/i.test(m.id) ? 1
+  : /nomic/i.test(m.id) ? 2 : 3;
+function fitFor(kind, m) {
+  if (!m) return "";
+  if (kind === "chatOcr") return fitLevel(memGb(m, SG_OCR_CTX));
+  // tính chung với model đang chọn ở ô kia; model kia tự nó đã không vừa thì chỉ chấm model này (khỏi báo sai "quá lớn")
+  const partner = kind === "chatModel" ? memGb(byId($("chatEmbed").value), SG_EMB_CTX) : memGb(byId($("chatModel").value), SG_CHAT_CTX);
+  const own = memGb(m, kind === "chatModel" ? SG_CHAT_CTX : SG_EMB_CTX);
+  return fitLevel(own + (fitLevel(partner) === "no" ? 0 : partner));
+}
+const fitMark = f => f ? t({ok: "sgOk", tight: "sgTight", no: "sgNo"}[f]) : "";
+function suggestion() {
+  if (!vramGb() || !models.length) return null;
+  const lvl = (c, e) => fitLevel(memGb(c, SG_CHAT_CTX) + memGb(e, SG_EMB_CTX));
+  // Xếp model trả lời: model chữ trước model thị giác (-vl-, chuyên đọc ảnh), rồi theo số tham số đọc từ tên (27b, 120b, e4b…;
+  // không theo dung lượng file vì bản nén Q8 nặng gấp đôi Q4 mà không thông minh hơn), rồi theo dung lượng.
+  const params = m => { const x = /(?:^|[-_/])e?(\d+(?:\.\d+)?)b(?=$|[-_.])/i.exec(m.id); return x ? +x[1] : (m.size_bytes || 0) / 0.6e9; };
+  const vl = m => /[-_]vl[-_]/i.test(m.id) ? 1 : 0;
+  const chats = models.filter(isChatCand).sort((a, b) => vl(a) - vl(b) || params(b) - params(a) || (b.size_bytes || 0) - (a.size_bytes || 0));
+  const embs = models.filter(m => m.type === "embeddings").sort((a, b) => embRank(a) - embRank(b) || (b.size_bytes || 0) - (a.size_bytes || 0));
+  const bestWith = (e, ok) => chats.find(c => ok.includes(lvl(c, e)));
+  let chat = null, emb = null;
+  for (const ok of [["ok"], ["ok", "tight"]]) {
+    // Model lập chỉ mục tốt quan trọng cho tiếng Việt: chọn loại tốt nhất mà vẫn còn chỗ cho model trả lời
+    // ít nhất bằng nửa model trả lời lớn nhất có thể (nếu dùng model lập chỉ mục nhỏ nhất).
+    const top = Math.max(0, ...(embs.length ? embs : [null]).map(e => { const c = bestWith(e, ok); return c ? params(c) : 0; }));
+    for (const e of embs.length ? embs : [null]) {
+      const c = bestWith(e, ok);
+      if (c && params(c) >= top * 0.5) { chat = c; emb = e; break; }
+    }
+    if (chat) break;
+  }
+  const vis = models.filter(m => m.type === "vlm" && fitLevel(memGb(m, SG_OCR_CTX)) !== "no");
+  const ocr = vis.find(m => /chandra/i.test(m.id)) || vis.find(m => /ocr/i.test(m.id)) || null;
+  const tips = [];
+  if (!chat) tips.push(t("sgNeedChat"));
+  if (!emb || embRank(emb) > 1) tips.push(t("sgNeedEmb"));
+  if (!ocr || !/chandra/i.test(ocr.id)) tips.push(t("sgNeedOcr"));
+  return {chat, emb, ocr, tips, vram: vramGb()};
+}
+function paintSugg() {
+  const s = suggestion(), box = $("chatSugg");
+  box.hidden = !s;
+  if (!s) return;
+  const same = (!s.chat || $("chatModel").value === s.chat.id) && (!s.emb || $("chatEmbed").value === s.emb.id) && (!s.ocr || $("chatOcr").value === s.ocr.id);
+  const row = (label, m, kind) => `<div class="sgrow"><span>${t(label)}</span><b>${m ? esc(m.id.split("/").pop()) : "–"}</b>${m
+    ? `<em>${gb(memGb(m, kind === "chatOcr" ? SG_OCR_CTX : kind === "chatEmbed" ? SG_EMB_CTX : SG_CHAT_CTX) * 1024)} GB</em>` : ""}</div>`;
+  const reindex = s.emb && chatState && chatState.embed_model && chatState.embed_model !== s.emb.id;
+  box.innerHTML = `<summary>${t("sgTitle", gb(s.vram * 1024))}</summary>
+    ${row("sgChat", s.chat, "chatModel")}${row("sgEmb", s.emb, "chatEmbed")}${row("sgOcr", s.ocr, "chatOcr")}
+    <div class="help">${t("sgNote")}</div>
+    ${s.tips.map(x => `<div class="sgtip">💡 ${esc(x)}</div>`).join("")}
+    ${same ? `<div class="sgsame">${t("sgSame")}</div>` : `<button id="sgApply" class="primary">${t("sgApply")}</button>`}
+    ${!same && reindex ? `<div class="help">${t("sgReindex")}</div>` : ""}`;
+  if (!box.dataset.init) { box.open = !same; box.dataset.init = "1"; }
+}
+$("chatSugg").addEventListener("click", e => {
+  if (e.target.id !== "sgApply") return;
+  const s = suggestion(); if (!s) return;
+  for (const [id, m] of [["chatModel", s.chat], ["chatEmbed", s.emb], ["chatOcr", s.ocr]])
+    if (m) { $(id).value = m.id; store.set(id, m.id); }
+  fillChatModels(); paintDocs();
+});
+
 function fillChatModels() {
-  const opt = m => `<option value="${esc(m.id)}">${esc(m.id)}${m.quantization ? ` (${esc(m.quantization)})` : ""}${m.state === "loaded" ? t("loaded") : ""}</option>`;
+  const opt = (m, kind) => `<option value="${esc(m.id)}">${esc(m.id)}${m.quantization ? ` (${esc(m.quantization)})` : ""}${m.state === "loaded" ? t("loaded") : ""}${fitMark(fitFor(kind, m))}</option>`;
   const fill = (id, list, pick, html) => {
     const el = $(id); if (document.activeElement === el) return;
     const cur = el.value || store.get(id) || pick(list) || "";
-    el.innerHTML = html || list.map(opt).join("");
+    el.innerHTML = html || list.map(m => opt(m, id)).join("");
     if (list.some(m => m.id === cur)) el.value = cur;
   };
   // Model tên có "embed" (vd. Qwen3 VL Embedding bị LM Studio xếp là model thị giác) không dùng để trả lời được: đưa xuống cuối.
@@ -1393,15 +1547,17 @@ function fillChatModels() {
   if (document.activeElement !== ocrEl && models.length) {  // đợi có danh sách model rồi mới chọn mặc định
     const saved = store.get("chatOcr");
     const want = ocrEl.dataset.init ? ocrEl.value : (saved !== null ? saved : ((vis.find(m => /ocr/i.test(m.id)) || {}).id || ""));
-    ocrEl.innerHTML = `<option value="">${esc(t("ocrNone"))}</option>` + vis.map(opt).join("");
+    ocrEl.innerHTML = `<option value="">${esc(t("ocrNone"))}</option>` + vis.map(m => opt(m, "chatOcr")).join("");
     ocrEl.value = vis.some(m => m.id === want) ? want : ""; ocrEl.dataset.init = "1";
   }
   fill("chatEmbed", [...emb, ...other],
        () => (chatState && chatState.embed_model) || (emb.find(m => /qwen3-embedding|bge-m3|e5/i.test(m.id)) || emb[0] || {}).id,
-       (emb.length ? `<optgroup label="${esc(t("embedGroupOk"))}">${emb.map(opt).join("")}</optgroup>` : "")
-       + (other.length ? `<optgroup label="${esc(t("embedGroupOther"))}">${other.map(opt).join("")}</optgroup>` : ""));
+       (emb.length ? `<optgroup label="${esc(t("embedGroupOk"))}">${emb.map(m => opt(m, "chatEmbed")).join("")}</optgroup>` : "")
+       + (other.length ? `<optgroup label="${esc(t("embedGroupOther"))}">${other.map(m => opt(m, "chatEmbed")).join("")}</optgroup>` : ""));
+  paintSugg();
 }
-["chatModel", "chatEmbed", "chatOcr"].forEach(id => { $(id).onchange = () => { store.set(id, $(id).value); paintDocs(); }; });
+// đổi model trả lời thì nhãn vừa/không vừa của model lập chỉ mục đổi theo (và ngược lại): vẽ lại các ô chọn
+["chatModel", "chatEmbed", "chatOcr"].forEach(id => { $(id).onchange = () => { store.set(id, $(id).value); fillChatModels(); paintDocs(); }; });
 async function loadChatState() {
   try { chatState = await api("/api/chat/state"); } catch (e) { return; }
   fillChatModels(); paintDocs();
@@ -1740,10 +1896,95 @@ async function chatSend() {
   } catch (e) { bot.error = e.message; }
   if (!bot.content && !bot.error) bot.error = "Model trả lời rỗng";
   chatBusy = false; paintChat(); $("chatInput").focus();
+  saveConv();
 }
 $("chatSend").onclick = chatSend;
 $("chatInput").onkeydown = e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); chatSend(); } };
-$("chatNew").onclick = () => { if (!chatBusy) { chatMsgs = []; paintChat(); } };
+
+// ----- Lịch sử hội thoại: lưu trên máy chủ (SQLite), tự lưu sau mỗi câu trả lời -----
+let convId = null, convTitle = "", convs = [], convTimer = null;
+const newConvId = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
+async function saveConv() {
+  if (!chatMsgs.length) return;
+  convId = convId || newConvId();
+  try {
+    const r = await api("/api/chat/conversations/" + convId, {method: "PUT", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({messages: chatMsgs})});
+    convTitle = r.title; store.set("chatConv", convId);
+  } catch (e) {}
+  paintConvName(); loadConvs();
+}
+async function loadConvs() {
+  try { convs = await api("/api/chat/conversations?q=" + encodeURIComponent($("convSearch").value.trim())); } catch (e) { convs = []; }
+  paintConvs();
+}
+function paintConvName() { $("convName").textContent = convId ? convTitle : t("convNew"); }
+function paintConvs() {
+  const q = $("convSearch").value.trim();
+  if (!convs.length) { $("convList").innerHTML = `<div class="convempty">${t(q ? "convNone" : "convEmpty")}</div>`; return; }
+  // nhóm theo ngày: hôm nay / hôm qua / 7 ngày qua / cũ hơn
+  const day = new Date(); day.setHours(0, 0, 0, 0);
+  const start = day.getTime() / 1000, grp = u => u >= start ? "convToday" : u >= start - 86400 ? "convYesterday" : u >= start - 7 * 86400 ? "convWeek" : "convOlder";
+  const when = u => { const d = new Date(u * 1000), z = v => String(v).padStart(2, "0");
+    return u >= start ? `${z(d.getHours())}:${z(d.getMinutes())}` : `${z(d.getDate())}/${z(d.getMonth() + 1)}/${d.getFullYear()}`; };
+  let last = "", h = "";
+  for (const c of convs) {
+    const g = grp(c.updated);
+    if (g !== last) { h += `<div class="convgrp">${t(g)}</div>`; last = g; }
+    h += `<div class="conv${c.id === convId ? " on" : ""}" data-conv="${esc(c.id)}" title="${esc(c.title)}">
+      <div class="ct">${esc(c.title)}</div><div class="cm">${when(c.updated)} · ${t("convMsgs", c.n)}</div>
+      <div class="ca"><button data-act="rename" title="${t("convRename")}">✎</button><button class="del" data-act="delete" title="${t("convDelete")}">🗑</button></div></div>`;
+  }
+  $("convList").innerHTML = h;
+}
+async function openConv(id) {
+  if (chatBusy) { alert(t("convBusy")); return; }
+  try {
+    const c = await api("/api/chat/conversations/" + encodeURIComponent(id));
+    convId = c.id; convTitle = c.title; chatMsgs = c.messages; store.set("chatConv", convId);
+  } catch (e) { alert(e.message); return; }
+  $("viewer").hidden = true;
+  paintChat(); paintConvName(); paintConvs();
+  const log = $("chatLog"); log.scrollTop = log.scrollHeight;
+}
+function newConv() {
+  if (chatBusy) return;
+  convId = null; convTitle = ""; chatMsgs = []; store.set("chatConv", "");
+  paintChat(); paintConvName(); paintConvs(); $("chatInput").focus();
+}
+$("chatNew").onclick = newConv;
+$("convList").onclick = async e => {
+  const item = e.target.closest("[data-conv]");
+  if (!item) return;
+  const id = item.dataset.conv, act = e.target.closest("[data-act]");
+  const c = convs.find(x => x.id === id) || {title: ""};
+  if (!act) { if (id !== convId) openConv(id); return; }
+  if (act.dataset.act === "rename") {
+    const name = prompt(t("convRenameAsk"), c.title);
+    if (!name || !name.trim() || name.trim() === c.title) return;
+    try {
+      await api("/api/chat/conversations/" + encodeURIComponent(id), {method: "PATCH", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({title: name.trim()})});
+      if (id === convId) { convTitle = name.trim(); paintConvName(); }
+    } catch (err) { alert(err.message); }
+  } else if (act.dataset.act === "delete") {
+    if (!confirm(t("convDeleteAsk", c.title))) return;
+    try { await api("/api/chat/conversations/" + encodeURIComponent(id), {method: "DELETE"}); } catch (err) { alert(err.message); return; }
+    if (id === convId) newConv();
+  }
+  loadConvs();
+};
+$("convSearch").oninput = () => { clearTimeout(convTimer); convTimer = setTimeout(loadConvs, 250); };
+$("convToggle").onclick = () => {
+  const off = $("convPane").closest(".chatcard").classList.toggle("noconv");
+  store.set("convPane", off ? "0" : "1");
+};
+if (store.get("convPane") === "0") document.querySelector(".chatcard").classList.add("noconv");
+(async () => {  // mở lại cuộc trò chuyện đang dở lần trước
+  await loadConvs();
+  const last = store.get("chatConv");
+  if (last && convs.some(c => c.id === last)) openConv(last); else paintConvName();
+})();
 
 applyLang();
 if (store.get("view") === "chat") setView("chat"); else setView("bench");
